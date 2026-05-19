@@ -6,8 +6,6 @@ import pandas as pd
 
 import numpy as np
 
-import plotly.graph_objects as go
-
 
 
 st.set_page_config(page_title="Stable Stock Decision App", layout="wide")
@@ -16,7 +14,7 @@ st.set_page_config(page_title="Stable Stock Decision App", layout="wide")
 
 st.title("📈 Stable Stock Decision Support App")
 
-st.caption("Technical + Fundamental + Forecast Scenarios | Educational only, not financial advice.")
+st.caption("Technical + Fundamental + Estimated Future Price | Educational only, not financial advice.")
 
 st.warning("This is educational research only. It is NOT financial advice or a guaranteed prediction.")
 
@@ -38,13 +36,7 @@ def get_all_tickers():
 
     try:
 
-        df1 = pd.read_csv(
-
-            "https://www.nasdaqtrader.com/dynamic/SymDir/nasdaqlisted.txt",
-
-            sep="|"
-
-        )
+        df1 = pd.read_csv("https://www.nasdaqtrader.com/dynamic/SymDir/nasdaqlisted.txt", sep="|")
 
         df1 = df1[df1["Test Issue"] == "N"]
 
@@ -58,13 +50,7 @@ def get_all_tickers():
 
     try:
 
-        df2 = pd.read_csv(
-
-            "https://www.nasdaqtrader.com/dynamic/SymDir/otherlisted.txt",
-
-            sep="|"
-
-        )
+        df2 = pd.read_csv("https://www.nasdaqtrader.com/dynamic/SymDir/otherlisted.txt", sep="|")
 
         df2 = df2[df2["Test Issue"] == "N"]
 
@@ -274,7 +260,7 @@ def add_indicators(df):
 
 
 
-def forecast_scenarios(df, days):
+def estimate_future_price(df, days):
 
     recent = df.tail(252).copy()
 
@@ -282,7 +268,7 @@ def forecast_scenarios(df, days):
 
     if len(recent) < 120:
 
-        return None, pd.DataFrame(), 0, "Not enough data"
+        return pd.DataFrame(), 0, "Not enough data"
 
 
 
@@ -297,28 +283,6 @@ def forecast_scenarios(df, days):
 
 
     last_price = recent["Close"].iloc[-1]
-
-    last_date = recent["Date"].iloc[-1]
-
-
-
-    future_dates = pd.date_range(
-
-        start=last_date + pd.Timedelta(days=1),
-
-        periods=days,
-
-        freq="D"
-
-    )
-
-
-
-    base_prices = []
-
-    bull_prices = []
-
-    bear_prices = []
 
 
 
@@ -340,129 +304,53 @@ def forecast_scenarios(df, days):
 
 
 
-        base_prices.append(base_price)
-
-        bull_prices.append(bull_price)
-
-        bear_prices.append(bear_price)
-
-
-
-    forecast_df = pd.DataFrame({
-
-        "Date": future_dates,
-
-        "Base Forecast": base_prices,
-
-        "Bull Case": bull_prices,
-
-        "Bear Case": bear_prices
-
-    })
-
-
-
-    expected_return = (forecast_df["Base Forecast"].iloc[-1] / last_price) - 1
+    expected_return = (base_price / last_price) - 1
 
 
 
     if expected_return >= 0.08:
 
-        forecast_label = "Strong Positive Forecast"
+        forecast_label = "Strong Positive Estimate"
 
     elif expected_return >= 0.03:
 
-        forecast_label = "Positive Forecast"
+        forecast_label = "Positive Estimate"
 
     elif expected_return <= -0.08:
 
-        forecast_label = "Strong Negative Forecast"
+        forecast_label = "Strong Negative Estimate"
 
     elif expected_return <= -0.03:
 
-        forecast_label = "Negative Forecast"
+        forecast_label = "Negative Estimate"
 
     else:
 
-        forecast_label = "Neutral Forecast"
+        forecast_label = "Neutral Estimate"
 
 
 
-    fig = go.Figure()
+    result = pd.DataFrame({
+
+        "Forecast Horizon": [f"{days} days"],
+
+        "Current Price": [round(last_price, 2)],
+
+        "Base Estimated Price": [round(base_price, 2)],
+
+        "Bull Case Price": [round(bull_price, 2)],
+
+        "Bear Case Price": [round(bear_price, 2)],
+
+        "Estimated Return": [f"{expected_return:.2%}"],
+
+        "Forecast Label": [forecast_label]
+
+    })
 
 
 
-    fig.add_trace(go.Scatter(
-
-        x=recent["Date"],
-
-        y=recent["Close"],
-
-        mode="lines",
-
-        name="Historical Price"
-
-    ))
-
-
-
-    fig.add_trace(go.Scatter(
-
-        x=forecast_df["Date"],
-
-        y=forecast_df["Base Forecast"],
-
-        mode="lines",
-
-        name="Base Forecast"
-
-    ))
-
-
-
-    fig.add_trace(go.Scatter(
-
-        x=forecast_df["Date"],
-
-        y=forecast_df["Bull Case"],
-
-        mode="lines",
-
-        name="Bull Case"
-
-    ))
-
-
-
-    fig.add_trace(go.Scatter(
-
-        x=forecast_df["Date"],
-
-        y=forecast_df["Bear Case"],
-
-        mode="lines",
-
-        name="Bear Case"
-
-    ))
-
-
-
-    fig.update_layout(
-
-        title="Historical Price + Forecast Scenarios",
-
-        xaxis_title="Date",
-
-        yaxis_title="Price",
-
-        height=500
-
-    )
-
-
-
-    return fig, forecast_df, expected_return, forecast_label
+    return result, expected_return, forecast_label
 
 
 
@@ -632,13 +520,13 @@ def score_stock(latest, fundamentals, expected_return):
 
         forecast_score = 2
 
-        reasons.append("Base forecast trend is positive.")
+        reasons.append("Estimated future return is positive.")
 
     elif expected_return <= -0.05:
 
         forecast_score = -2
 
-        reasons.append("Base forecast trend is negative.")
+        reasons.append("Estimated future return is negative.")
 
 
 
@@ -806,42 +694,6 @@ def scanner_score(ticker, period):
 
 
 
-def make_price_chart(df, ticker):
-
-    fig = go.Figure()
-
-
-
-    fig.add_trace(go.Scatter(x=df["Date"], y=df["Close"], mode="lines", name="Close"))
-
-    fig.add_trace(go.Scatter(x=df["Date"], y=df["MA20"], mode="lines", name="MA20"))
-
-    fig.add_trace(go.Scatter(x=df["Date"], y=df["MA50"], mode="lines", name="MA50"))
-
-    fig.add_trace(go.Scatter(x=df["Date"], y=df["MA200"], mode="lines", name="MA200"))
-
-
-
-    fig.update_layout(
-
-        title=f"{ticker} Price Trend",
-
-        xaxis_title="Date",
-
-        yaxis_title="Price",
-
-        height=500
-
-    )
-
-
-
-    return fig
-
-
-
-
-
 tickers, ticker_df = get_all_tickers()
 
 
@@ -850,15 +702,7 @@ st.sidebar.header("Settings")
 
 
 
-period = st.sidebar.selectbox(
-
-    "Historical period",
-
-    ["1y", "2y", "5y"],
-
-    index=2
-
-)
+period = st.sidebar.selectbox("Historical period", ["1y", "2y", "5y"], index=2)
 
 
 
@@ -932,109 +776,105 @@ with tab1:
 
 
 
-            forecast_fig, forecast_df, expected_return, forecast_label = forecast_scenarios(
+            estimate_df, expected_return, forecast_label = estimate_future_price(df, forecast_days)
 
-                df,
 
-                forecast_days
+
+            technical_score, fundamental_score, forecast_score, total_score, risk, signal, reasons = score_stock(
+
+                latest,
+
+                fundamentals,
+
+                expected_return
 
             )
 
 
 
-            if forecast_fig is None:
-
-                st.error("Not enough data for forecast scenarios.")
-
-            else:
-
-                technical_score, fundamental_score, forecast_score, total_score, risk, signal, reasons = score_stock(
-
-                    latest,
-
-                    fundamentals,
-
-                    expected_return
-
-                )
+            st.subheader(f"{selected_ticker} Summary")
 
 
 
-                st.subheader(f"{selected_ticker} Summary")
+            c1, c2, c3, c4, c5 = st.columns(5)
 
 
 
-                c1, c2, c3, c4, c5 = st.columns(5)
+            c1.metric("Current Price", f"${latest['Close']:.2f}")
+
+            c2.metric("Risk", risk)
+
+            c3.metric("Total Score", total_score)
+
+            c4.metric("Estimated Return", f"{expected_return:.2%}")
+
+            c5.metric("Signal", signal)
 
 
 
-                c1.metric("Price", f"${latest['Close']:.2f}")
+            st.info(
 
-                c2.metric("Risk", risk)
+                f"Educational model signal for next {forecast_days} days: {signal}. "
 
-                c3.metric("Total Score", total_score)
+                f"Estimate label: {forecast_label}."
 
-                c4.metric("Base Forecast Return", f"{expected_return:.2%}")
-
-                c5.metric("Signal", signal)
+            )
 
 
 
-                st.info(
+            st.markdown("### Estimated Future Price")
 
-                    f"Educational model signal for next {forecast_days} days: {signal}. "
-
-                    f"Forecast label: {forecast_label}."
-
-                )
+            st.dataframe(estimate_df, use_container_width=True)
 
 
 
-                st.plotly_chart(
+            st.caption(
 
-                    make_price_chart(df, selected_ticker),
+                "These are estimated scenario prices based on historical trend and volatility. "
 
-                    use_container_width=True
+                "They are not guaranteed future prices or financial advice."
 
-                )
-
-
-
-                st.markdown("### Forecast Scenarios")
-
-                st.plotly_chart(forecast_fig, use_container_width=True)
+            )
 
 
 
-                st.markdown("### Forecasted Scenario Prices")
+            st.markdown("### Score Breakdown")
 
-                st.dataframe(forecast_df, use_container_width=True)
+            score_df = pd.DataFrame({
+
+                "Category": ["Technical Score", "Fundamental Score", "Forecast Score", "Total Score"],
+
+                "Score": [technical_score, fundamental_score, forecast_score, total_score]
+
+            })
+
+            st.dataframe(score_df, use_container_width=True)
 
 
 
-                st.markdown("### Why this signal?")
+            st.markdown("### Why this signal?")
 
-                for r in reasons:
+            for r in reasons:
 
-                    st.write(f"- {r}")
+                st.write(f"- {r}")
 
 
 
-                st.markdown("### Fundamentals")
+            st.markdown("### Fundamentals")
 
-                st.dataframe(
+            st.dataframe(
 
-                    pd.DataFrame({
+                pd.DataFrame({
 
-                        "Metric": list(fundamentals.keys()),
+                    "Metric": list(fundamentals.keys()),
 
-                        "Value": list(fundamentals.values())
+                    "Value": list(fundamentals.values())
 
-                    }),
+                }),
 
-                    use_container_width=True
+                use_container_width=True
 
-                )
+            )
 
 
 

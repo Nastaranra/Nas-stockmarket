@@ -26,7 +26,6 @@ st.title("📈 Advanced Stock Decision Support App")
 
 st.caption("Live S&P 500 + Nasdaq-100 | Technical + Fundamental + ML Forecast + Backtest")
 
-st.warning("Educational research only. This is NOT financial advice and does NOT guarantee profit.")
 
 
 

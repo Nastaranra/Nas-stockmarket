@@ -8,8 +8,6 @@ import numpy as np
 
 import plotly.graph_objects as go
 
-from sklearn.ensemble import RandomForestRegressor
-
 
 
 st.set_page_config(page_title="Stable Stock Decision App", layout="wide")
@@ -18,9 +16,9 @@ st.set_page_config(page_title="Stable Stock Decision App", layout="wide")
 
 st.title("📈 Stable Stock Decision Support App")
 
-st.caption("Technical + Fundamental + ML Forecast | Educational only, not financial advice.")
+st.caption("Technical + Fundamental + Forecast Scenarios | Educational only, not financial advice.")
 
-
+st.warning("This is educational research only. It is NOT financial advice or a guaranteed prediction.")
 
 
 
@@ -242,8 +240,6 @@ def add_indicators(df):
 
 
 
-    df["Return_5D"] = df["Close"].pct_change(5)
-
     df["Return_1M"] = df["Close"].pct_change(21)
 
     df["Return_3M"] = df["Close"].pct_change(63)
@@ -278,165 +274,37 @@ def add_indicators(df):
 
 
 
-def ml_forecast_chart(df, days):
+def forecast_scenarios(df, days):
 
-    recent = df.copy()
-
-
-
-    if len(recent) < 260:
-
-        return None, pd.DataFrame(), 0, "Not enough data"
+    recent = df.tail(252).copy()
 
 
 
-    data = recent.copy()
-
-
-
-    data["Lag_1"] = data["Close"].shift(1)
-
-    data["Lag_5"] = data["Close"].shift(5)
-
-    data["Lag_10"] = data["Close"].shift(10)
-
-    data["Lag_20"] = data["Close"].shift(20)
-
-    data["MA20_Model"] = data["Close"].rolling(20).mean()
-
-    data["MA50_Model"] = data["Close"].rolling(50).mean()
-
-    data["Return_5D_Model"] = data["Close"].pct_change(5)
-
-    data["Return_20D_Model"] = data["Close"].pct_change(20)
-
-    data["Volatility_Model"] = data["Close"].pct_change().rolling(20).std()
-
-    data["Target"] = data["Close"].shift(-1)
-
-
-
-    data = data.dropna()
-
-
-
-    features = [
-
-        "Lag_1",
-
-        "Lag_5",
-
-        "Lag_10",
-
-        "Lag_20",
-
-        "MA20_Model",
-
-        "MA50_Model",
-
-        "Return_5D_Model",
-
-        "Return_20D_Model",
-
-        "Volatility_Model"
-
-    ]
-
-
-
-    if len(data) < 150:
+    if len(recent) < 120:
 
         return None, pd.DataFrame(), 0, "Not enough data"
 
 
 
-    X = data[features]
-
-    y = data["Target"]
+    daily_returns = recent["Close"].pct_change().dropna()
 
 
 
-    model = RandomForestRegressor(
+    avg_return = daily_returns.mean()
 
-        n_estimators=250,
-
-        max_depth=8,
-
-        min_samples_leaf=5,
-
-        random_state=42,
-
-        n_jobs=-1
-
-    )
+    volatility = daily_returns.std()
 
 
 
-    model.fit(X, y)
+    last_price = recent["Close"].iloc[-1]
 
-
-
-    forecast_prices = []
-
-    temp = recent[["Date", "Close"]].copy()
-
-
-
-    for _ in range(days):
-
-        temp_model = temp.copy()
-
-
-
-        temp_model["Lag_1"] = temp_model["Close"].shift(1)
-
-        temp_model["Lag_5"] = temp_model["Close"].shift(5)
-
-        temp_model["Lag_10"] = temp_model["Close"].shift(10)
-
-        temp_model["Lag_20"] = temp_model["Close"].shift(20)
-
-        temp_model["MA20_Model"] = temp_model["Close"].rolling(20).mean()
-
-        temp_model["MA50_Model"] = temp_model["Close"].rolling(50).mean()
-
-        temp_model["Return_5D_Model"] = temp_model["Close"].pct_change(5)
-
-        temp_model["Return_20D_Model"] = temp_model["Close"].pct_change(20)
-
-        temp_model["Volatility_Model"] = temp_model["Close"].pct_change().rolling(20).std()
-
-
-
-        latest_features = temp_model[features].dropna().iloc[[-1]]
-
-        next_price = model.predict(latest_features)[0]
-
-
-
-        next_date = temp["Date"].iloc[-1] + pd.Timedelta(days=1)
-
-
-
-        new_row = pd.DataFrame({
-
-            "Date": [next_date],
-
-            "Close": [next_price]
-
-        })
-
-
-
-        temp = pd.concat([temp, new_row], ignore_index=True)
-
-        forecast_prices.append(next_price)
+    last_date = recent["Date"].iloc[-1]
 
 
 
     future_dates = pd.date_range(
 
-        start=recent["Date"].iloc[-1] + pd.Timedelta(days=1),
+        start=last_date + pd.Timedelta(days=1),
 
         periods=days,
 
@@ -446,21 +314,55 @@ def ml_forecast_chart(df, days):
 
 
 
+    base_prices = []
+
+    bull_prices = []
+
+    bear_prices = []
+
+
+
+    base_price = last_price
+
+    bull_price = last_price
+
+    bear_price = last_price
+
+
+
+    for _ in range(days):
+
+        base_price = base_price * (1 + avg_return)
+
+        bull_price = bull_price * (1 + avg_return + volatility * 0.35)
+
+        bear_price = bear_price * (1 + avg_return - volatility * 0.35)
+
+
+
+        base_prices.append(base_price)
+
+        bull_prices.append(bull_price)
+
+        bear_prices.append(bear_price)
+
+
+
     forecast_df = pd.DataFrame({
 
         "Date": future_dates,
 
-        "Forecasted Price": forecast_prices
+        "Base Forecast": base_prices,
+
+        "Bull Case": bull_prices,
+
+        "Bear Case": bear_prices
 
     })
 
 
 
-    current_price = recent["Close"].iloc[-1]
-
-    final_price = forecast_df["Forecasted Price"].iloc[-1]
-
-    expected_return = (final_price / current_price) - 1
+    expected_return = (forecast_df["Base Forecast"].iloc[-1] / last_price) - 1
 
 
 
@@ -492,9 +394,9 @@ def ml_forecast_chart(df, days):
 
     fig.add_trace(go.Scatter(
 
-        x=recent["Date"].tail(260),
+        x=recent["Date"],
 
-        y=recent["Close"].tail(260),
+        y=recent["Close"],
 
         mode="lines",
 
@@ -508,11 +410,39 @@ def ml_forecast_chart(df, days):
 
         x=forecast_df["Date"],
 
-        y=forecast_df["Forecasted Price"],
+        y=forecast_df["Base Forecast"],
 
         mode="lines",
 
-        name="ML Forecast"
+        name="Base Forecast"
+
+    ))
+
+
+
+    fig.add_trace(go.Scatter(
+
+        x=forecast_df["Date"],
+
+        y=forecast_df["Bull Case"],
+
+        mode="lines",
+
+        name="Bull Case"
+
+    ))
+
+
+
+    fig.add_trace(go.Scatter(
+
+        x=forecast_df["Date"],
+
+        y=forecast_df["Bear Case"],
+
+        mode="lines",
+
+        name="Bear Case"
 
     ))
 
@@ -520,7 +450,7 @@ def ml_forecast_chart(df, days):
 
     fig.update_layout(
 
-        title="Historical Price + ML Forecast",
+        title="Historical Price + Forecast Scenarios",
 
         xaxis_title="Date",
 
@@ -702,13 +632,13 @@ def score_stock(latest, fundamentals, expected_return):
 
         forecast_score = 2
 
-        reasons.append("ML forecast trend is positive.")
+        reasons.append("Base forecast trend is positive.")
 
     elif expected_return <= -0.05:
 
         forecast_score = -2
 
-        reasons.append("ML forecast trend is negative.")
+        reasons.append("Base forecast trend is negative.")
 
 
 
@@ -736,7 +666,7 @@ def score_stock(latest, fundamentals, expected_return):
 
 
 
-def scanner_score(ticker, period, forecast_days):
+def scanner_score(ticker, period):
 
     df = load_price_data(ticker, period)
 
@@ -1002,7 +932,7 @@ with tab1:
 
 
 
-            forecast_fig, forecast_df, expected_return, forecast_label = ml_forecast_chart(
+            forecast_fig, forecast_df, expected_return, forecast_label = forecast_scenarios(
 
                 df,
 
@@ -1014,7 +944,7 @@ with tab1:
 
             if forecast_fig is None:
 
-                st.error("Not enough data for ML forecast.")
+                st.error("Not enough data for forecast scenarios.")
 
             else:
 
@@ -1044,7 +974,7 @@ with tab1:
 
                 c3.metric("Total Score", total_score)
 
-                c4.metric("ML Forecast Return", f"{expected_return:.2%}")
+                c4.metric("Base Forecast Return", f"{expected_return:.2%}")
 
                 c5.metric("Signal", signal)
 
@@ -1070,13 +1000,13 @@ with tab1:
 
 
 
-                st.markdown("### ML Forecast Chart")
+                st.markdown("### Forecast Scenarios")
 
                 st.plotly_chart(forecast_fig, use_container_width=True)
 
 
 
-                st.markdown("### Forecasted Prices")
+                st.markdown("### Forecasted Scenario Prices")
 
                 st.dataframe(forecast_df, use_container_width=True)
 
@@ -1114,7 +1044,7 @@ with tab2:
 
     st.subheader("Stable Scanner")
 
-    st.write(f"Scanning first {scan_count} stocks. This version is lighter to reduce crashes.")
+    st.write(f"Scanning first {scan_count} stocks. This scanner is lighter to reduce crashes.")
 
 
 
@@ -1126,7 +1056,7 @@ with tab2:
 
     for i, ticker in enumerate(tickers[:scan_count]):
 
-        result = scanner_score(ticker, period, forecast_days)
+        result = scanner_score(ticker, period)
 
 
 

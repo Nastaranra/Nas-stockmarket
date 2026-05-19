@@ -10,23 +10,17 @@ import plotly.graph_objects as go
 
 from datetime import timedelta
 
-from sklearn.ensemble import RandomForestClassifier
 
-from sklearn.model_selection import train_test_split
 
-from sklearn.metrics import accuracy_score
+st.set_page_config(page_title="Stable Stock Decision App", layout="wide")
 
 
 
-st.set_page_config(page_title="Advanced Stock Decision App", layout="wide")
+st.title("📈 Stable Stock Decision Support App")
 
+st.caption("Technical + Fundamental + Forecast | Educational only, not financial advice.")
 
-
-st.title("📈 Advanced Stock Decision Support App")
-
-st.caption("Live US Stocks | Technical + Fundamental + ML Forecast + Forecast Chart")
-
-st.warning("Educational research only. This is NOT financial advice and does NOT guarantee profit.")
+st.warning("This is educational research only. It is NOT financial advice.")
 
 
 
@@ -46,13 +40,11 @@ def get_all_tickers():
 
     try:
 
-        nasdaq_url = "https://www.nasdaqtrader.com/dynamic/SymDir/nasdaqlisted.txt"
+        df1 = pd.read_csv("https://www.nasdaqtrader.com/dynamic/SymDir/nasdaqlisted.txt", sep="|")
 
-        nasdaq_df = pd.read_csv(nasdaq_url, sep="|")
+        df1 = df1[df1["Test Issue"] == "N"]
 
-        nasdaq_df = nasdaq_df[nasdaq_df["Test Issue"] == "N"]
-
-        tickers += nasdaq_df["Symbol"].astype(str).tolist()
+        tickers += df1["Symbol"].astype(str).tolist()
 
     except Exception:
 
@@ -62,13 +54,11 @@ def get_all_tickers():
 
     try:
 
-        other_url = "https://www.nasdaqtrader.com/dynamic/SymDir/otherlisted.txt"
+        df2 = pd.read_csv("https://www.nasdaqtrader.com/dynamic/SymDir/otherlisted.txt", sep="|")
 
-        other_df = pd.read_csv(other_url, sep="|")
+        df2 = df2[df2["Test Issue"] == "N"]
 
-        other_df = other_df[other_df["Test Issue"] == "N"]
-
-        tickers += other_df["ACT Symbol"].astype(str).tolist()
+        tickers += df2["ACT Symbol"].astype(str).tolist()
 
     except Exception:
 
@@ -78,31 +68,13 @@ def get_all_tickers():
 
     clean = []
 
-
-
     for t in tickers:
 
-        if isinstance(t, str):
+        t = str(t).strip().replace(".", "-")
 
-            t = t.strip().replace(".", "-")
+        if len(t) <= 6 and "$" not in t and " " not in t and t.upper() != "FILE":
 
-
-
-            if (
-
-                len(t) <= 6
-
-                and "$" not in t
-
-                and " " not in t
-
-                and t.upper() != "FILE"
-
-                and t != ""
-
-            ):
-
-                clean.append(t)
+            clean.append(t)
 
 
 
@@ -110,7 +82,7 @@ def get_all_tickers():
 
 
 
-    if len(clean) == 0:
+    if not clean:
 
         clean = FALLBACK
 
@@ -224,7 +196,7 @@ def load_fundamentals(ticker):
 
 
 
-def safe_num(x, default=None):
+def safe_num(x, default=0):
 
     try:
 
@@ -256,10 +228,6 @@ def add_indicators(df):
 
     df["MA200"] = df["Close"].rolling(200).mean()
 
-
-
-    df["Return_5D"] = df["Close"].pct_change(5)
-
     df["Return_1M"] = df["Close"].pct_change(21)
 
     df["Return_3M"] = df["Close"].pct_change(63)
@@ -288,151 +256,13 @@ def add_indicators(df):
 
 
 
-    df["Target_30D"] = (df["Close"].shift(-30) > df["Close"]).astype(int)
-
-
-
     return df.dropna()
 
 
 
 
 
-def ml_probability(df):
-
-    features = [
-
-        "RSI", "MA20", "MA50", "MA200",
-
-        "Return_5D", "Return_1M", "Return_3M", "Volatility"
-
-    ]
-
-
-
-    if len(df) < 260:
-
-        return None, None
-
-
-
-    data = df[features + ["Target_30D"]].dropna()
-
-
-
-    if len(data) < 200:
-
-        return None, None
-
-
-
-    X = data[features]
-
-    y = data["Target_30D"]
-
-
-
-    X_train, X_test, y_train, y_test = train_test_split(
-
-        X,
-
-        y,
-
-        test_size=0.25,
-
-        shuffle=False
-
-    )
-
-
-
-    model = RandomForestClassifier(
-
-        n_estimators=150,
-
-        max_depth=5,
-
-        random_state=42
-
-    )
-
-
-
-    model.fit(X_train, y_train)
-
-
-
-    accuracy = accuracy_score(y_test, model.predict(X_test))
-
-
-
-    latest_X = df[features].iloc[[-1]]
-
-    probability = model.predict_proba(latest_X)[0][1]
-
-
-
-    return probability, accuracy
-
-
-
-
-
-def forecast_trend(df, days):
-
-    recent = df.tail(180).copy()
-
-
-
-    if len(recent) < 30:
-
-        return 0, "Not enough data", None
-
-
-
-    x = np.arange(len(recent))
-
-    y = recent["Close"].values
-
-
-
-    slope, intercept = np.polyfit(x, y, 1)
-
-
-
-    forecast_price = slope * (len(recent) + days) + intercept
-
-    current_price = recent["Close"].iloc[-1]
-
-
-
-    expected_return = (forecast_price / current_price) - 1
-
-    forecast_date = recent["Date"].iloc[-1] + timedelta(days=days)
-
-
-
-    if expected_return >= 0.05:
-
-        label = "Positive Forecast"
-
-    elif expected_return <= -0.05:
-
-        label = "Negative Forecast"
-
-    else:
-
-        label = "Neutral Forecast"
-
-
-
-    return expected_return, label, forecast_date
-
-
-
-
-
-def make_forecast_chart(df, forecast_days):
+def forecast_chart(df, days):
 
     recent = df.tail(180).copy()
 
@@ -448,21 +278,17 @@ def make_forecast_chart(df, forecast_days):
 
 
 
-    future_x = np.arange(len(recent), len(recent) + forecast_days)
+    future_x = np.arange(len(recent), len(recent) + days)
 
     future_prices = slope * future_x + intercept
 
 
 
-    last_date = recent["Date"].iloc[-1]
-
-
-
     future_dates = pd.date_range(
 
-        start=last_date + pd.Timedelta(days=1),
+        start=recent["Date"].iloc[-1] + pd.Timedelta(days=1),
 
-        periods=forecast_days,
+        periods=days,
 
         freq="D"
 
@@ -477,6 +303,28 @@ def make_forecast_chart(df, forecast_days):
         "Forecasted Price": future_prices
 
     })
+
+
+
+    current_price = recent["Close"].iloc[-1]
+
+    final_price = forecast_df["Forecasted Price"].iloc[-1]
+
+    expected_return = (final_price / current_price) - 1
+
+
+
+    if expected_return >= 0.05:
+
+        forecast_label = "Positive Forecast"
+
+    elif expected_return <= -0.05:
+
+        forecast_label = "Negative Forecast"
+
+    else:
+
+        forecast_label = "Neutral Forecast"
 
 
 
@@ -506,7 +354,7 @@ def make_forecast_chart(df, forecast_days):
 
         mode="lines",
 
-        name="Forecasted Price"
+        name="Forecast Trend"
 
     ))
 
@@ -514,7 +362,7 @@ def make_forecast_chart(df, forecast_days):
 
     fig.update_layout(
 
-        title="Historical Price + Forecast",
+        title="Historical Price + Forecast Trend",
 
         xaxis_title="Date",
 
@@ -526,37 +374,35 @@ def make_forecast_chart(df, forecast_days):
 
 
 
-    return fig, forecast_df
+    return fig, forecast_df, expected_return, forecast_label
 
 
 
 
 
-def score_stock(latest, fundamentals, expected_return, probability):
+def score_stock(latest, fundamentals, expected_return):
 
     technical_score = 0
 
     fundamental_score = 0
 
-    forecast_score = 0
-
     reasons = []
 
 
 
-    close = safe_num(latest["Close"], 0)
+    close = safe_num(latest["Close"])
 
-    ma20 = safe_num(latest["MA20"], 0)
+    ma20 = safe_num(latest["MA20"])
 
-    ma50 = safe_num(latest["MA50"], 0)
+    ma50 = safe_num(latest["MA50"])
 
-    ma200 = safe_num(latest["MA200"], 0)
+    ma200 = safe_num(latest["MA200"])
 
-    rsi = safe_num(latest["RSI"], 0)
+    rsi = safe_num(latest["RSI"])
 
-    ret1 = safe_num(latest["Return_1M"], 0)
+    ret1 = safe_num(latest["Return_1M"])
 
-    ret3 = safe_num(latest["Return_3M"], 0)
+    ret3 = safe_num(latest["Return_3M"])
 
     vol = safe_num(latest["Volatility"], 1)
 
@@ -568,23 +414,17 @@ def score_stock(latest, fundamentals, expected_return, probability):
 
         reasons.append("Price is above MA20.")
 
-
-
     if close > ma50:
 
         technical_score += 1
 
         reasons.append("Price is above MA50.")
 
-
-
     if close > ma200:
 
         technical_score += 1
 
         reasons.append("Price is above MA200.")
-
-
 
     if ma20 > ma50:
 
@@ -620,8 +460,6 @@ def score_stock(latest, fundamentals, expected_return, probability):
 
         reasons.append("1-month return is positive.")
 
-
-
     if ret3 > 0:
 
         technical_score += 1
@@ -648,17 +486,17 @@ def score_stock(latest, fundamentals, expected_return, probability):
 
 
 
-    pe = safe_num(fundamentals.get("P/E Ratio"))
+    pe = safe_num(fundamentals.get("P/E Ratio"), None)
 
-    fpe = safe_num(fundamentals.get("Forward P/E"))
+    fpe = safe_num(fundamentals.get("Forward P/E"), None)
 
-    margin = safe_num(fundamentals.get("Profit Margin"))
+    margin = safe_num(fundamentals.get("Profit Margin"), None)
 
-    growth = safe_num(fundamentals.get("Revenue Growth"))
+    growth = safe_num(fundamentals.get("Revenue Growth"), None)
 
-    debt = safe_num(fundamentals.get("Debt to Equity"))
+    debt = safe_num(fundamentals.get("Debt to Equity"), None)
 
-    roe = safe_num(fundamentals.get("ROE"))
+    roe = safe_num(fundamentals.get("ROE"), None)
 
 
 
@@ -668,15 +506,11 @@ def score_stock(latest, fundamentals, expected_return, probability):
 
         reasons.append("P/E ratio appears reasonable.")
 
-
-
     if fpe is not None and 0 < fpe < 35:
 
         fundamental_score += 1
 
         reasons.append("Forward P/E appears reasonable.")
-
-
 
     if margin is not None and margin > 0.10:
 
@@ -684,23 +518,17 @@ def score_stock(latest, fundamentals, expected_return, probability):
 
         reasons.append("Profit margin is strong.")
 
-
-
     if growth is not None and growth > 0.05:
 
         fundamental_score += 1
 
         reasons.append("Revenue growth is positive.")
 
-
-
     if debt is not None and debt < 150:
 
         fundamental_score += 1
 
         reasons.append("Debt-to-equity appears manageable.")
-
-
 
     if roe is not None and roe > 0.10:
 
@@ -710,33 +538,19 @@ def score_stock(latest, fundamentals, expected_return, probability):
 
 
 
+    forecast_score = 0
+
     if expected_return >= 0.05:
 
-        forecast_score += 2
+        forecast_score = 2
 
-        reasons.append("Trend forecast is positive.")
+        reasons.append("Forecast trend is positive.")
 
     elif expected_return <= -0.05:
 
-        forecast_score -= 2
+        forecast_score = -2
 
-        reasons.append("Trend forecast is negative.")
-
-
-
-    if probability is not None:
-
-        if probability >= 0.60:
-
-            forecast_score += 2
-
-            reasons.append("ML model shows higher probability of positive return.")
-
-        elif probability <= 0.40:
-
-            forecast_score -= 2
-
-            reasons.append("ML model shows lower probability of positive return.")
+        reasons.append("Forecast trend is negative.")
 
 
 
@@ -744,7 +558,7 @@ def score_stock(latest, fundamentals, expected_return, probability):
 
 
 
-    if total_score >= 11 and risk != "High":
+    if total_score >= 10 and risk != "High":
 
         signal = "Buy Signal"
 
@@ -764,7 +578,7 @@ def score_stock(latest, fundamentals, expected_return, probability):
 
 
 
-def analyze_stock(ticker, period, forecast_days):
+def scanner_score(ticker, period, forecast_days):
 
     df = load_price_data(ticker, period)
 
@@ -786,29 +600,101 @@ def analyze_stock(ticker, period, forecast_days):
 
 
 
-    fundamentals = load_fundamentals(ticker)
-
     latest = df.iloc[-1]
 
 
 
-    expected_return, forecast_label, forecast_date = forecast_trend(df, forecast_days)
-
-    probability, ml_accuracy = ml_probability(df)
+    fig, forecast_df, expected_return, forecast_label = forecast_chart(df, forecast_days)
 
 
 
-    technical_score, fundamental_score, forecast_score, total_score, risk, signal, reasons = score_stock(
+    close = safe_num(latest["Close"])
 
-        latest,
+    ma20 = safe_num(latest["MA20"])
 
-        fundamentals,
+    ma50 = safe_num(latest["MA50"])
 
-        expected_return,
+    ma200 = safe_num(latest["MA200"])
 
-        probability
+    rsi = safe_num(latest["RSI"])
 
-    )
+    vol = safe_num(latest["Volatility"], 1)
+
+
+
+    score = 0
+
+
+
+    if close > ma20:
+
+        score += 1
+
+    if close > ma50:
+
+        score += 1
+
+    if close > ma200:
+
+        score += 1
+
+    if ma20 > ma50:
+
+        score += 1
+
+    if 45 <= rsi <= 65:
+
+        score += 2
+
+    elif 30 <= rsi < 45:
+
+        score += 1
+
+    elif rsi > 70:
+
+        score -= 1
+
+
+
+    if expected_return >= 0.05:
+
+        score += 2
+
+    elif expected_return <= -0.05:
+
+        score -= 2
+
+
+
+    if vol > 0.45:
+
+        risk = "High"
+
+        score -= 2
+
+    elif vol > 0.25:
+
+        risk = "Medium"
+
+        score -= 1
+
+    else:
+
+        risk = "Low"
+
+
+
+    if score >= 7 and risk != "High":
+
+        signal = "Buy Signal"
+
+    elif score <= 2 or risk == "High":
+
+        signal = "Sell Signal / High Caution"
+
+    else:
+
+        signal = "Hold / Neutral"
 
 
 
@@ -816,51 +702,21 @@ def analyze_stock(ticker, period, forecast_days):
 
         "Ticker": ticker,
 
-        "Company": fundamentals.get("Company"),
+        "Price": round(close, 2),
 
-        "Sector": fundamentals.get("Sector"),
+        "RSI": round(rsi, 1),
 
-        "Price": round(safe_num(latest["Close"], 0), 2),
+        "Volatility": round(vol, 3),
 
-        "RSI": round(safe_num(latest["RSI"], 0), 1),
-
-        "Volatility": round(safe_num(latest["Volatility"], 0), 3),
-
-        "Technical Score": technical_score,
-
-        "Fundamental Score": fundamental_score,
-
-        "Forecast Score": forecast_score,
-
-        "Total Score": total_score,
+        "Score": score,
 
         "Risk": risk,
 
-        "ML Positive Probability %": round(probability * 100, 2) if probability is not None else None,
-
-        "ML Backtest Accuracy %": round(ml_accuracy * 100, 2) if ml_accuracy is not None else None,
-
         "Forecast Return %": round(expected_return * 100, 2),
-
-        "Forecast Date": forecast_date.date() if forecast_date is not None else None,
 
         "Forecast Label": forecast_label,
 
-        "Final Signal": signal,
-
-        "P/E Ratio": fundamentals.get("P/E Ratio"),
-
-        "Profit Margin": fundamentals.get("Profit Margin"),
-
-        "Revenue Growth": fundamentals.get("Revenue Growth"),
-
-        "Debt to Equity": fundamentals.get("Debt to Equity"),
-
-        "Data": df,
-
-        "Fundamentals": fundamentals,
-
-        "Reasons": reasons
+        "Signal": signal
 
     }
 
@@ -868,7 +724,7 @@ def analyze_stock(ticker, period, forecast_days):
 
 
 
-def make_chart(df, ticker):
+def make_price_chart(df, ticker):
 
     fig = go.Figure()
 
@@ -912,27 +768,11 @@ st.sidebar.header("Settings")
 
 
 
-period = st.sidebar.selectbox(
-
-    "Historical period",
-
-    ["1y", "2y", "5y"],
-
-    index=2
-
-)
+period = st.sidebar.selectbox("Historical period", ["1y", "2y", "5y"], index=1)
 
 
 
-forecast_days = st.sidebar.selectbox(
-
-    "Forecast horizon",
-
-    [7, 14, 30, 60, 90],
-
-    index=2
-
-)
+forecast_days = st.sidebar.selectbox("Forecast horizon", [7, 14, 30, 60, 90], index=2)
 
 
 
@@ -956,25 +796,11 @@ st.sidebar.write(f"Available tickers loaded: {len(tickers)}")
 
 
 
-selected_ticker = st.sidebar.selectbox(
-
-    "Select one stock",
-
-    tickers
-
-)
+selected_ticker = st.sidebar.selectbox("Select one stock", tickers)
 
 
 
-tab1, tab2, tab3 = st.tabs([
-
-    "Single Stock",
-
-    "All Stocks Scanner",
-
-    "Ticker List"
-
-])
+tab1, tab2, tab3 = st.tabs(["Single Stock", "Stable Scanner", "Ticker List"])
 
 
 
@@ -982,177 +808,105 @@ tab1, tab2, tab3 = st.tabs([
 
 with tab1:
 
-    result = analyze_stock(selected_ticker, period, forecast_days)
+    df = load_price_data(selected_ticker, period)
 
 
 
-    if result is None:
+    if df.empty:
 
-        st.error("Could not analyze this stock.")
+        st.error("Could not load data.")
 
     else:
 
-        st.subheader(f"{selected_ticker} Summary")
+        df = add_indicators(df)
 
 
 
-        c1, c2, c3, c4, c5 = st.columns(5)
+        if df.empty:
 
+            st.error("Not enough data.")
 
+        else:
 
-        c1.metric("Price", f"${result['Price']}")
+            fundamentals = load_fundamentals(selected_ticker)
 
-        c2.metric("Risk", result["Risk"])
+            latest = df.iloc[-1]
 
-        c3.metric("Total Score", result["Total Score"])
 
 
+            forecast_fig, forecast_df, expected_return, forecast_label = forecast_chart(df, forecast_days)
 
-        ml_prob = result["ML Positive Probability %"]
 
-        c4.metric("ML Probability", f"{ml_prob}%" if ml_prob is not None else "N/A")
 
+            technical_score, fundamental_score, forecast_score, total_score, risk, signal, reasons = score_stock(
 
+                latest,
 
-        c5.metric("Signal", result["Final Signal"])
+                fundamentals,
 
+                expected_return
 
+            )
 
-        st.info(
 
-            f"Educational model signal until {result['Forecast Date']}: "
 
-            f"{result['Final Signal']}"
+            st.subheader(f"{selected_ticker} Summary")
 
-        )
 
 
+            c1, c2, c3, c4, c5 = st.columns(5)
 
-        st.plotly_chart(
+            c1.metric("Price", f"${latest['Close']:.2f}")
 
-            make_chart(result["Data"], selected_ticker),
+            c2.metric("Risk", risk)
 
-            use_container_width=True
+            c3.metric("Total Score", total_score)
 
-        )
+            c4.metric("Forecast Return", f"{expected_return:.2%}")
 
+            c5.metric("Signal", signal)
 
 
-        st.markdown("### Forecast Chart")
 
+            st.info(f"Educational model signal for next {forecast_days} days: {signal}")
 
 
-        forecast_fig, forecast_df = make_forecast_chart(
 
-            result["Data"],
+            st.plotly_chart(make_price_chart(df, selected_ticker), use_container_width=True)
 
-            forecast_days
 
-        )
 
+            st.markdown("### Forecast Chart")
 
+            st.plotly_chart(forecast_fig, use_container_width=True)
 
-        st.plotly_chart(
+            st.dataframe(forecast_df, use_container_width=True)
 
-            forecast_fig,
 
-            use_container_width=True
 
-        )
+            st.markdown("### Why this signal?")
 
+            for r in reasons:
 
+                st.write(f"- {r}")
 
-        st.dataframe(
 
-            forecast_df,
 
-            use_container_width=True
+            st.markdown("### Fundamentals")
 
-        )
+            st.dataframe(
 
+                pd.DataFrame({
 
+                    "Metric": list(fundamentals.keys()),
 
-        st.markdown("### Why this signal?")
+                    "Value": list(fundamentals.values())
 
+                }),
 
+                use_container_width=True
 
-        for reason in result["Reasons"]:
-
-            st.write(f"- {reason}")
-
-
-
-        st.markdown("### Details")
-
-
-
-        detail_df = pd.DataFrame({
-
-            "Metric": [
-
-                "Technical Score",
-
-                "Fundamental Score",
-
-                "Forecast Score",
-
-                "ML Positive Probability %",
-
-                "ML Backtest Accuracy %",
-
-                "Forecast Return %",
-
-                "Forecast Date",
-
-                "Forecast Label"
-
-            ],
-
-            "Value": [
-
-                result["Technical Score"],
-
-                result["Fundamental Score"],
-
-                result["Forecast Score"],
-
-                result["ML Positive Probability %"],
-
-                result["ML Backtest Accuracy %"],
-
-                result["Forecast Return %"],
-
-                result["Forecast Date"],
-
-                result["Forecast Label"]
-
-            ]
-
-        })
-
-
-
-        st.dataframe(detail_df, use_container_width=True)
-
-
-
-        st.markdown("### Fundamentals")
-
-
-
-        st.dataframe(
-
-            pd.DataFrame({
-
-                "Metric": list(result["Fundamentals"].keys()),
-
-                "Value": list(result["Fundamentals"].values())
-
-            }),
-
-            use_container_width=True
-
-        )
+            )
 
 
 
@@ -1160,17 +914,13 @@ with tab1:
 
 with tab2:
 
-    st.subheader("All Stocks Scanner")
+    st.subheader("Stable Scanner")
 
-
-
-    st.write(f"Scanning first {scan_count} stocks from live US stock list.")
+    st.write(f"Scanning first {scan_count} stocks. This version is lighter to reduce crashes.")
 
 
 
     rows = []
-
-
 
     progress = st.progress(0)
 
@@ -1178,21 +928,13 @@ with tab2:
 
     for i, ticker in enumerate(tickers[:scan_count]):
 
-        result = analyze_stock(ticker, period, forecast_days)
+        result = scanner_score(ticker, period, forecast_days)
 
 
 
         if result is not None:
 
-            row = result.copy()
-
-            row.pop("Data", None)
-
-            row.pop("Fundamentals", None)
-
-            row.pop("Reasons", None)
-
-            rows.append(row)
+            rows.append(result)
 
 
 
@@ -1202,11 +944,7 @@ with tab2:
 
     if rows:
 
-        scanner_df = pd.DataFrame(rows)
-
-        scanner_df = scanner_df.sort_values("Total Score", ascending=False)
-
-
+        scanner_df = pd.DataFrame(rows).sort_values("Score", ascending=False)
 
         st.dataframe(scanner_df, use_container_width=True)
 
@@ -1214,35 +952,19 @@ with tab2:
 
         st.download_button(
 
-            "Download Results",
+            "Download Scanner Results",
 
             scanner_df.to_csv(index=False).encode("utf-8"),
 
-            "advanced_stock_scanner_results.csv",
+            "stable_stock_scanner_results.csv",
 
             "text/csv"
 
         )
 
-
-
-        st.markdown("### Signal Summary")
-
-
-
-        signal_summary = scanner_df["Final Signal"].value_counts().reset_index()
-
-        signal_summary.columns = ["Signal", "Count"]
-
-
-
-        st.dataframe(signal_summary, use_container_width=True)
-
-
-
     else:
 
-        st.warning("No results found.")
+        st.warning("No scanner results found.")
 
 
 
@@ -1250,12 +972,8 @@ with tab2:
 
 with tab3:
 
-    st.subheader("Live Ticker List")
-
-
+    st.subheader("Ticker List")
 
     st.write(f"Total tickers loaded: {len(ticker_df)}")
-
-
 
     st.dataframe(ticker_df, use_container_width=True)

@@ -24,7 +24,7 @@ st.set_page_config(page_title="Advanced Stock Decision App", layout="wide")
 
 st.title("📈 Advanced Stock Decision Support App")
 
-st.caption("Live US Stocks | Technical + Fundamental + ML Forecast + Scanner")
+st.caption("Live US Stocks | Technical + Fundamental + ML Forecast + Forecast Chart")
 
 st.warning("Educational research only. This is NOT financial advice and does NOT guarantee profit.")
 
@@ -427,6 +427,106 @@ def forecast_trend(df, days):
 
 
     return expected_return, label, forecast_date
+
+
+
+
+
+def make_forecast_chart(df, forecast_days):
+
+    recent = df.tail(180).copy()
+
+
+
+    x = np.arange(len(recent))
+
+    y = recent["Close"].values
+
+
+
+    slope, intercept = np.polyfit(x, y, 1)
+
+
+
+    future_x = np.arange(len(recent), len(recent) + forecast_days)
+
+    future_prices = slope * future_x + intercept
+
+
+
+    last_date = recent["Date"].iloc[-1]
+
+
+
+    future_dates = pd.date_range(
+
+        start=last_date + pd.Timedelta(days=1),
+
+        periods=forecast_days,
+
+        freq="D"
+
+    )
+
+
+
+    forecast_df = pd.DataFrame({
+
+        "Date": future_dates,
+
+        "Forecasted Price": future_prices
+
+    })
+
+
+
+    fig = go.Figure()
+
+
+
+    fig.add_trace(go.Scatter(
+
+        x=recent["Date"],
+
+        y=recent["Close"],
+
+        mode="lines",
+
+        name="Historical Price"
+
+    ))
+
+
+
+    fig.add_trace(go.Scatter(
+
+        x=forecast_df["Date"],
+
+        y=forecast_df["Forecasted Price"],
+
+        mode="lines",
+
+        name="Forecasted Price"
+
+    ))
+
+
+
+    fig.update_layout(
+
+        title="Historical Price + Forecast",
+
+        xaxis_title="Date",
+
+        yaxis_title="Price",
+
+        height=500
+
+    )
+
+
+
+    return fig, forecast_df
 
 
 
@@ -906,7 +1006,13 @@ with tab1:
 
         c3.metric("Total Score", result["Total Score"])
 
-        c4.metric("ML Probability", f"{result['ML Positive Probability %']}%")
+
+
+        ml_prob = result["ML Positive Probability %"]
+
+        c4.metric("ML Probability", f"{ml_prob}%" if ml_prob is not None else "N/A")
+
+
 
         c5.metric("Signal", result["Final Signal"])
 
@@ -932,7 +1038,43 @@ with tab1:
 
 
 
+        st.markdown("### Forecast Chart")
+
+
+
+        forecast_fig, forecast_df = make_forecast_chart(
+
+            result["Data"],
+
+            forecast_days
+
+        )
+
+
+
+        st.plotly_chart(
+
+            forecast_fig,
+
+            use_container_width=True
+
+        )
+
+
+
+        st.dataframe(
+
+            forecast_df,
+
+            use_container_width=True
+
+        )
+
+
+
         st.markdown("### Why this signal?")
+
+
 
         for reason in result["Reasons"]:
 
@@ -1117,4 +1259,3 @@ with tab3:
 
 
     st.dataframe(ticker_df, use_container_width=True)
-

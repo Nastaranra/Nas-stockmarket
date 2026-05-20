@@ -6,6 +6,8 @@ import pandas as pd
 
 import numpy as np
 
+import plotly.graph_objects as go
+
 
 
 st.set_page_config(page_title="Stable Stock Decision App", layout="wide")
@@ -255,6 +257,42 @@ def add_indicators(df):
 
 
     return df.dropna()
+
+
+
+
+
+def make_price_chart(df, ticker):
+
+    fig = go.Figure()
+
+
+
+    fig.add_trace(go.Scatter(x=df["Date"], y=df["Close"], mode="lines", name="Close Price"))
+
+    fig.add_trace(go.Scatter(x=df["Date"], y=df["MA20"], mode="lines", name="MA20"))
+
+    fig.add_trace(go.Scatter(x=df["Date"], y=df["MA50"], mode="lines", name="MA50"))
+
+    fig.add_trace(go.Scatter(x=df["Date"], y=df["MA200"], mode="lines", name="MA200"))
+
+
+
+    fig.update_layout(
+
+        title=f"{ticker} Historical Price Trend",
+
+        xaxis_title="Date",
+
+        yaxis_title="Price",
+
+        height=500
+
+    )
+
+
+
+    return fig
 
 
 
@@ -817,6 +855,18 @@ with tab1:
                 f"Educational model signal for next {forecast_days} days: {signal}. "
 
                 f"Estimate label: {forecast_label}."
+
+            )
+
+
+
+            st.markdown("### Historical Price Chart")
+
+            st.plotly_chart(
+
+                make_price_chart(df, selected_ticker),
+
+                use_container_width=True
 
             )
 

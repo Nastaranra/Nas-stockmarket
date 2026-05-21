@@ -20,9 +20,9 @@ st.set_page_config(page_title="AI Stock Decision Support", layout="wide")
 
 st.title("📈 AI Stock Decision Support App")
 
-st.caption("Technical + Fundamental + News Sentiment | Educational only, not financial advice.")
+st.caption("Technical + Fundamental + News + Short-Term & Long-Term Signals")
 
-st.warning("This is NOT financial advice. Signals are educational estimates only.")
+st.warning("Educational only. This is NOT financial advice or guaranteed prediction.")
 
 
 
@@ -148,15 +148,15 @@ def load_price_data(ticker, period, interval):
 
 
 
-        if "Close" not in df.columns:
-
-            return pd.DataFrame()
-
-
-
         if "Datetime" in df.columns:
 
             df = df.rename(columns={"Datetime": "Date"})
+
+
+
+        if "Date" not in df.columns or "Close" not in df.columns:
+
+            return pd.DataFrame()
 
 
 
@@ -278,17 +278,13 @@ def load_news_sentiment(ticker):
 
 
 
-        rows = []
-
-
-
         positive_words = [
 
             "beat", "beats", "growth", "strong", "upgrade", "surge", "record",
 
             "profit", "higher", "bullish", "positive", "gain", "rally",
 
-            "outperform", "raises", "increase"
+            "outperform", "raises", "increase", "optimistic"
 
         ]
 
@@ -300,11 +296,13 @@ def load_news_sentiment(ticker):
 
             "loss", "lower", "bearish", "negative", "decline", "cut",
 
-            "warning", "risk", "investigation"
+            "warning", "risk", "investigation", "concern"
 
         ]
 
 
+
+        rows = []
 
         sentiment_score = 0
 
@@ -478,9 +476,15 @@ def add_indicators(df):
 
 
 
-    typical_price = (df["High"] + df["Low"] + df["Close"]) / 3 if "High" in df.columns and "Low" in df.columns else df["Close"]
+    if "High" in df.columns and "Low" in df.columns and "Volume" in df.columns:
 
-    df["VWAP"] = (typical_price * df.get("Volume", 1)).cumsum() / df.get("Volume", 1).cumsum()
+        typical_price = (df["High"] + df["Low"] + df["Close"]) / 3
+
+        df["VWAP"] = (typical_price * df["Volume"]).cumsum() / df["Volume"].cumsum()
+
+    else:
+
+        df["VWAP"] = df["Close"]
 
 
 
@@ -496,19 +500,19 @@ def estimate_future_price(df, days):
 
 
 
-    if len(recent) < 120:
+    if len(recent) < 60:
 
         return pd.DataFrame(), 0, "Not enough data"
 
 
 
-    daily_returns = recent["Close"].pct_change().dropna()
+    returns = recent["Close"].pct_change().dropna()
 
 
 
-    avg_return = daily_returns.mean()
+    avg_return = returns.mean()
 
-    volatility = daily_returns.std()
+    volatility = returns.std()
 
 
 
@@ -540,23 +544,23 @@ def estimate_future_price(df, days):
 
     if expected_return >= 0.08:
 
-        forecast_label = "Strong Positive Estimate"
+        label = "Strong Positive Estimate"
 
     elif expected_return >= 0.03:
 
-        forecast_label = "Positive Estimate"
+        label = "Positive Estimate"
 
     elif expected_return <= -0.08:
 
-        forecast_label = "Strong Negative Estimate"
+        label = "Strong Negative Estimate"
 
     elif expected_return <= -0.03:
 
-        forecast_label = "Negative Estimate"
+        label = "Negative Estimate"
 
     else:
 
-        forecast_label = "Neutral Estimate"
+        label = "Neutral Estimate"
 
 
 
@@ -574,19 +578,19 @@ def estimate_future_price(df, days):
 
         "Estimated Return": [f"{expected_return:.2%}"],
 
-        "Forecast Label": [forecast_label]
+        "Forecast Label": [label]
 
     })
 
 
 
-    return result, expected_return, forecast_label
+    return result, expected_return, label
 
 
 
 
 
-def make_price_chart(df, ticker):
+def make_price_chart(df, ticker, title_suffix=""):
 
     fig = go.Figure()
 
@@ -604,7 +608,7 @@ def make_price_chart(df, ticker):
 
     fig.update_layout(
 
-        title=f"{ticker} Historical Price Chart",
+        title=f"{ticker} Price Chart {title_suffix}",
 
         xaxis_title="Date",
 
@@ -622,15 +626,9 @@ def make_price_chart(df, ticker):
 
 
 
-def score_stock(latest, fundamentals, expected_return, news_score):
+def technical_score_only(latest):
 
-    technical_score = 0
-
-    fundamental_score = 0
-
-    forecast_score = 0
-
-    news_signal_score = 0
+    score = 0
 
     reasons = []
 
@@ -660,81 +658,103 @@ def score_stock(latest, fundamentals, expected_return, news_score):
 
     if close > ma9:
 
-        technical_score += 1
+        score += 1
 
         reasons.append("Price is above MA9.")
 
     if close > ma20:
 
-        technical_score += 1
+        score += 1
 
         reasons.append("Price is above MA20.")
 
     if ma9 > ma20:
 
-        technical_score += 1
+        score += 1
 
         reasons.append("Short-term trend is positive.")
 
     if ma20 > ma50:
 
-        technical_score += 1
+        score += 1
 
         reasons.append("Medium-term trend is positive.")
 
     if close > vwap:
 
-        technical_score += 1
+        score += 1
 
         reasons.append("Price is above VWAP.")
 
     if macd > macd_signal:
 
-        technical_score += 1
+        score += 1
 
         reasons.append("MACD is bullish.")
 
+
+
     if 45 <= rsi <= 65:
 
-        technical_score += 1
+        score += 1
 
         reasons.append("RSI is healthy.")
 
     elif rsi > 70:
 
-        technical_score -= 1
+        score -= 1
 
         reasons.append("RSI may be overbought.")
 
     elif rsi < 30:
 
-        technical_score -= 1
+        score -= 1
 
-        reasons.append("RSI is weak/oversold.")
+        reasons.append("RSI is weak or oversold.")
 
 
 
     if volume_ratio > 1.5:
 
-        technical_score += 1
+        score += 1
 
         reasons.append("Volume is above average.")
 
 
 
-    if vol < 0.30:
-
-        risk = "Low"
-
-    elif vol < 0.55:
-
-        risk = "Medium"
-
-    else:
+    if vol > 0.55:
 
         risk = "High"
 
-        technical_score -= 2
+        score -= 2
+
+        reasons.append("Volatility is high.")
+
+    elif vol > 0.30:
+
+        risk = "Medium"
+
+        reasons.append("Volatility is moderate.")
+
+    else:
+
+        risk = "Low"
+
+        reasons.append("Volatility is low.")
+
+
+
+    return score, risk, reasons
+
+
+
+
+
+def fundamental_score_only(fundamentals):
+
+    score = 0
+
+    reasons = []
 
 
 
@@ -754,39 +774,77 @@ def score_stock(latest, fundamentals, expected_return, news_score):
 
     if pe is not None and 0 < pe < 40:
 
-        fundamental_score += 1
+        score += 1
 
         reasons.append("P/E ratio is acceptable.")
 
     if fpe is not None and 0 < fpe < 40:
 
-        fundamental_score += 1
+        score += 1
 
         reasons.append("Forward P/E is acceptable.")
 
     if margin is not None and margin > 0.10:
 
-        fundamental_score += 1
+        score += 1
 
         reasons.append("Profit margin is strong.")
 
     if growth is not None and growth > 0.05:
 
-        fundamental_score += 1
+        score += 1
 
         reasons.append("Revenue growth is positive.")
 
     if debt is not None and debt < 200:
 
-        fundamental_score += 1
+        score += 1
 
         reasons.append("Debt-to-equity is manageable.")
 
     if roe is not None and roe > 0.10:
 
-        fundamental_score += 1
+        score += 1
 
         reasons.append("ROE is strong.")
+
+
+
+    return score, reasons
+
+
+
+
+
+def build_signal(total_score, risk):
+
+    if total_score >= 11 and risk != "High":
+
+        return "Buy Signal"
+
+    elif total_score <= 3 or risk == "High":
+
+        return "Sell Signal / High Caution"
+
+    else:
+
+        return "Hold / Wait"
+
+
+
+
+
+def score_stock(latest, fundamentals, expected_return, news_score):
+
+    technical_score, risk, tech_reasons = technical_score_only(latest)
+
+    fundamental_score, fund_reasons = fundamental_score_only(fundamentals)
+
+
+
+    forecast_score = 0
+
+    forecast_reasons = []
 
 
 
@@ -794,49 +852,51 @@ def score_stock(latest, fundamentals, expected_return, news_score):
 
         forecast_score += 2
 
-        reasons.append("Estimated future return is positive.")
+        forecast_reasons.append("Estimated future return is positive.")
 
     elif expected_return <= -0.05:
 
         forecast_score -= 2
 
-        reasons.append("Estimated future return is negative.")
+        forecast_reasons.append("Estimated future return is negative.")
+
+    else:
+
+        forecast_reasons.append("Estimated future return is neutral.")
+
+
+
+    news_score_component = 0
+
+    news_reasons = []
 
 
 
     if news_score > 0.25:
 
-        news_signal_score += 2
+        news_score_component += 2
 
-        reasons.append("Recent news sentiment is positive.")
+        news_reasons.append("Recent news sentiment is positive.")
 
     elif news_score < -0.25:
 
-        news_signal_score -= 2
+        news_score_component -= 2
 
-        reasons.append("Recent news sentiment is negative.")
-
-    else:
-
-        reasons.append("Recent news sentiment is neutral or unavailable.")
-
-
-
-    total_score = technical_score + fundamental_score + forecast_score + news_signal_score
-
-
-
-    if total_score >= 11 and risk != "High":
-
-        signal = "Buy Signal"
-
-    elif total_score <= 3 or risk == "High":
-
-        signal = "Sell Signal / High Caution"
+        news_reasons.append("Recent news sentiment is negative.")
 
     else:
 
-        signal = "Hold / Wait"
+        news_reasons.append("Recent news sentiment is neutral or unavailable.")
+
+
+
+    total_score = technical_score + fundamental_score + forecast_score + news_score_component
+
+    signal = build_signal(total_score, risk)
+
+
+
+    reasons = tech_reasons + fund_reasons + forecast_reasons + news_reasons
 
 
 
@@ -848,7 +908,7 @@ def score_stock(latest, fundamentals, expected_return, news_score):
 
         "forecast_score": forecast_score,
 
-        "news_score_component": news_signal_score,
+        "news_score_component": news_score_component,
 
         "total_score": total_score,
 
@@ -888,81 +948,11 @@ def scanner_score(ticker, period, interval):
 
     latest = df.iloc[-1]
 
-
-
-    close = safe_num(latest["Close"])
-
-    ma9 = safe_num(latest["MA9"])
-
-    ma20 = safe_num(latest["MA20"])
-
-    ma50 = safe_num(latest["MA50"])
-
-    rsi = safe_num(latest["RSI"])
-
-    macd = safe_num(latest["MACD"])
-
-    macd_signal = safe_num(latest["MACD_Signal"])
-
-    vwap = safe_num(latest["VWAP"])
-
-    vol = safe_num(latest["Volatility"], 1)
+    score, risk, _ = technical_score_only(latest)
 
 
 
-    score = 0
-
-
-
-    if close > ma9:
-
-        score += 1
-
-    if close > ma20:
-
-        score += 1
-
-    if ma9 > ma20:
-
-        score += 1
-
-    if ma20 > ma50:
-
-        score += 1
-
-    if close > vwap:
-
-        score += 1
-
-    if macd > macd_signal:
-
-        score += 1
-
-    if 45 <= rsi <= 65:
-
-        score += 1
-
-    elif rsi > 70 or rsi < 30:
-
-        score -= 1
-
-
-
-    if vol > 0.55:
-
-        risk = "High"
-
-        score -= 2
-
-    elif vol > 0.30:
-
-        risk = "Medium"
-
-    else:
-
-        risk = "Low"
-
-
+    signal = "Hold / Wait"
 
     if score >= 6 and risk != "High":
 
@@ -972,19 +962,15 @@ def scanner_score(ticker, period, interval):
 
         signal = "Sell Signal / High Caution"
 
-    else:
-
-        signal = "Hold / Wait"
-
 
 
     return {
 
         "Ticker": ticker,
 
-        "Price": round(close, 2),
+        "Price": round(safe_num(latest["Close"]), 2),
 
-        "RSI": round(rsi, 1),
+        "RSI": round(safe_num(latest["RSI"]), 1),
 
         "Score": score,
 
@@ -1010,7 +996,7 @@ mode = st.sidebar.selectbox(
 
     "Trading mode",
 
-    ["Intraday / Short-term", "Swing / Multi-day"],
+    ["Intraday / Short-term", "Swing / Multi-day", "Historical / Long-term"],
 
     index=0
 
@@ -1024,21 +1010,39 @@ if mode == "Intraday / Short-term":
 
     interval = "5m"
 
-else:
+elif mode == "Swing / Multi-day":
 
     period = "1y"
 
     interval = "1d"
 
+else:
+
+    period = "5y"
+
+    interval = "1d"
 
 
-forecast_days = st.sidebar.selectbox(
 
-    "Forecast horizon",
+short_term_days = st.sidebar.selectbox(
 
-    [1, 3, 5, 10, 30, 60, 90],
+    "Short-term horizon",
+
+    [1, 3, 5, 10, 14],
 
     index=2
+
+)
+
+
+
+long_term_days = st.sidebar.selectbox(
+
+    "Long-term horizon",
+
+    [30, 60, 90, 120, 180],
+
+    index=1
 
 )
 
@@ -1100,7 +1104,25 @@ with tab1:
 
             news_df, news_score, news_label = load_news_sentiment(selected_ticker)
 
-            estimate_df, expected_return, forecast_label = estimate_future_price(df, forecast_days)
+
+
+            short_estimate_df, short_expected_return, short_forecast_label = estimate_future_price(
+
+                df,
+
+                short_term_days
+
+            )
+
+
+
+            long_estimate_df, long_expected_return, long_forecast_label = estimate_future_price(
+
+                df,
+
+                long_term_days
+
+            )
 
 
 
@@ -1108,13 +1130,27 @@ with tab1:
 
 
 
-            scores = score_stock(
+            short_scores = score_stock(
 
                 latest,
 
                 fundamentals,
 
-                expected_return,
+                short_expected_return,
+
+                news_score
+
+            )
+
+
+
+            long_scores = score_stock(
+
+                latest,
+
+                fundamentals,
+
+                long_expected_return,
 
                 news_score
 
@@ -1132,67 +1168,191 @@ with tab1:
 
             c1.metric("Current Price", f"${latest['Close']:.2f}")
 
-            c2.metric("Risk", scores["risk"])
+            c2.metric("Risk", short_scores["risk"])
 
-            c3.metric("Total Score", scores["total_score"])
+            c3.metric(f"Short-Term Signal ({short_term_days} days)", short_scores["signal"])
 
-            c4.metric("News", news_label)
+            c4.metric(f"Long-Term Signal ({long_term_days} days)", long_scores["signal"])
 
-            c5.metric("Signal", scores["signal"])
+            c5.metric("News", news_label)
+
+
+
+            st.markdown("### Signal Explanation")
 
 
 
             st.info(
 
-                f"Educational signal: {scores['signal']} | "
+                f"Short-term view: for the next {short_term_days} days, the model shows "
 
-                f"Mode: {mode} | Forecast label: {forecast_label}"
+                f"**{short_scores['signal']}**. Estimated return: **{short_expected_return:.2%}**. "
+
+                f"Reason: {short_forecast_label}."
 
             )
 
 
 
-            st.markdown("### Historical Price Chart")
+            st.info(
 
-            st.plotly_chart(make_price_chart(df, selected_ticker), use_container_width=True)
+                f"Long-term view: for the next {long_term_days} days, the model shows "
+
+                f"**{long_scores['signal']}**. Estimated return: **{long_expected_return:.2%}**. "
+
+                f"Reason: {long_forecast_label}."
+
+            )
+
+
+
+            st.caption(
+
+                "Signals are based on technical indicators, fundamentals, estimated future return, "
+
+                "and recent news sentiment when API key is available. This is not financial advice."
+
+            )
+
+
+
+            st.markdown("### Price Chart")
+
+            st.plotly_chart(
+
+                make_price_chart(df, selected_ticker, f"({mode})"),
+
+                use_container_width=True
+
+            )
+
+
+
+            st.markdown("### Long-Term Historical Chart")
+
+
+
+            hist_df = load_price_data(selected_ticker, "5y", "1d")
+
+
+
+            if hist_df.empty:
+
+                st.warning("Could not load long-term historical data.")
+
+            else:
+
+                hist_df = add_indicators(hist_df)
+
+
+
+                if hist_df.empty:
+
+                    st.warning("Not enough long-term historical data.")
+
+                else:
+
+                    st.plotly_chart(
+
+                        make_price_chart(hist_df, selected_ticker, "(5-Year Historical)"),
+
+                        use_container_width=True
+
+                    )
 
 
 
             st.markdown("### Estimated Future Price")
 
-            st.dataframe(estimate_df, use_container_width=True)
+
+
+            combined_estimate_df = pd.concat(
+
+                [short_estimate_df, long_estimate_df],
+
+                ignore_index=True
+
+            )
+
+
+
+            st.dataframe(combined_estimate_df, use_container_width=True)
 
 
 
             st.markdown("### Score Breakdown")
 
+
+
             score_df = pd.DataFrame({
 
-                "Category": ["Technical", "Fundamental", "Forecast", "News", "Total"],
+                "Category": [
+
+                    "Short Technical",
+
+                    "Short Fundamental",
+
+                    "Short Forecast",
+
+                    "Short News",
+
+                    "Short Total",
+
+                    "Long Technical",
+
+                    "Long Fundamental",
+
+                    "Long Forecast",
+
+                    "Long News",
+
+                    "Long Total"
+
+                ],
 
                 "Score": [
 
-                    scores["technical_score"],
+                    short_scores["technical_score"],
 
-                    scores["fundamental_score"],
+                    short_scores["fundamental_score"],
 
-                    scores["forecast_score"],
+                    short_scores["forecast_score"],
 
-                    scores["news_score_component"],
+                    short_scores["news_score_component"],
 
-                    scores["total_score"]
+                    short_scores["total_score"],
+
+                    long_scores["technical_score"],
+
+                    long_scores["fundamental_score"],
+
+                    long_scores["forecast_score"],
+
+                    long_scores["news_score_component"],
+
+                    long_scores["total_score"]
 
                 ]
 
             })
 
+
+
             st.dataframe(score_df, use_container_width=True)
 
 
 
-            st.markdown("### Why this signal?")
+            st.markdown("### Why Short-Term Signal?")
 
-            for reason in scores["reasons"]:
+            for reason in short_scores["reasons"]:
+
+                st.write(f"- {reason}")
+
+
+
+            st.markdown("### Why Long-Term Signal?")
+
+            for reason in long_scores["reasons"]:
 
                 st.write(f"- {reason}")
 
@@ -1217,6 +1377,8 @@ with tab1:
 
 
             st.markdown("### Recent News")
+
+
 
             if news_df.empty:
 

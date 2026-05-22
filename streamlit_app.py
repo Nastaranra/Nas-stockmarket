@@ -710,7 +710,7 @@ def technical_score_only(latest):
 
     volume_ratio = safe_num(latest["Volume_Ratio"], 1)
 
-    vol = safe_num(latest["Volatility
+    vol = safe_num(latest["Volatility"], 1)
 
 
 

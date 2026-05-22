@@ -22,13 +22,11 @@ st.set_page_config(page_title="AI Trading Signal App", layout="wide")
 
 st.title("📈 AI Trading Signal App")
 
-st.caption("Technical + Fundamental + News + Market Direction + Trading Plan")
+st.caption("Live Price + Locked Trading Plan + Technical + Fundamental + News + Market Direction")
 
 st.warning("Educational only. Not financial advice. No signal is guaranteed.")
 
 
-
-# Auto refresh
 
 st_autorefresh(interval=60 * 1000, key="live_refresh")
 
@@ -250,7 +248,17 @@ def load_news_sentiment(ticker):
 
         url = "https://finnhub.io/api/v1/company-news"
 
-        params = {"symbol": ticker, "from": str(start), "to": str(today), "token": api_key}
+        params = {
+
+            "symbol": ticker,
+
+            "from": str(start),
+
+            "to": str(today),
+
+            "token": api_key
+
+        }
 
 
 
@@ -696,44 +704,6 @@ def estimate_future_price(df, days):
 
 
 
-def make_price_chart(df, ticker, title_suffix=""):
-
-    fig = go.Figure()
-
-
-
-    fig.add_trace(go.Scatter(x=df["Date"], y=df["Close"], mode="lines", name="Close"))
-
-    fig.add_trace(go.Scatter(x=df["Date"], y=df["MA9"], mode="lines", name="MA9"))
-
-    fig.add_trace(go.Scatter(x=df["Date"], y=df["MA20"], mode="lines", name="MA20"))
-
-    fig.add_trace(go.Scatter(x=df["Date"], y=df["MA50"], mode="lines", name="MA50"))
-
-    fig.add_trace(go.Scatter(x=df["Date"], y=df["VWAP"], mode="lines", name="VWAP"))
-
-
-
-    fig.update_layout(
-
-        title=f"{ticker} Price Chart {title_suffix}",
-
-        xaxis_title="Date",
-
-        yaxis_title="Price",
-
-        height=500
-
-    )
-
-
-
-    return fig
-
-
-
-
-
 def technical_score_only(latest):
 
     score = 0
@@ -1134,81 +1104,7 @@ def confidence_score(scores, expected_return, news_score):
 
 
 
-def final_trade_decision(signal, confidence, expected_return, risk, buy_low, buy_high, target, stop_loss):
-
-    expected_return_pct = expected_return * 100
-
-
-
-    if buy_high is not None and not pd.isna(buy_high):
-
-        trade_return_pct = ((target - buy_high) / buy_high) * 100
-
-        downside_risk_pct = ((buy_high - stop_loss) / buy_high) * 100
-
-    else:
-
-        trade_return_pct = expected_return_pct
-
-        downside_risk_pct = np.nan
-
-
-
-    if expected_return_pct < 0:
-
-        return "WAIT / DO NOT BUY", "Estimated return is negative.", trade_return_pct, downside_risk_pct
-
-
-
-    if expected_return_pct < 1:
-
-        return "WAIT", "Expected return is too small.", trade_return_pct, downside_risk_pct
-
-
-
-    if risk == "High":
-
-        return "AVOID", "Risk is high.", trade_return_pct, downside_risk_pct
-
-
-
-    if "Avoid" in signal or "Sell" in signal:
-
-        return "AVOID", "Main signal is avoid/sell.", trade_return_pct, downside_risk_pct
-
-
-
-    if confidence < 70:
-
-        return "WAIT", "Confidence is not strong enough.", trade_return_pct, downside_risk_pct
-
-
-
-    if trade_return_pct < 2:
-
-        return "WATCH ONLY", "Trade return from buy zone to target is too small.", trade_return_pct, downside_risk_pct
-
-
-
-    if not pd.isna(downside_risk_pct) and downside_risk_pct > 5:
-
-        return "WAIT", "Downside risk is too high.", trade_return_pct, downside_risk_pct
-
-
-
-    if signal in ["Strong Buy", "Buy Signal", "Buy on Dip"]:
-
-        return "BUY ON DIP", "Confidence, return, and risk/reward look acceptable.", trade_return_pct, downside_risk_pct
-
-
-
-    return "WAIT", "Setup is not strong enough.", trade_return_pct, downside_risk_pct
-
-
-
-
-
-def trade_plan(latest, signal, confidence, expected_return, horizon_days, risk):
+def build_locked_plan(latest, signal, confidence, expected_return, horizon_days, risk):
 
     close = safe_num(latest["Close"])
 
@@ -1250,9 +1146,9 @@ def trade_plan(latest, signal, confidence, expected_return, horizon_days, risk):
 
     elif "Sell" in signal or "Avoid" in signal:
 
-        buy_low = np.nan
+        buy_low = None
 
-        buy_high = np.nan
+        buy_high = None
 
         target = min(support, close - 1.4 * atr)
 
@@ -1276,11 +1172,77 @@ def trade_plan(latest, signal, confidence, expected_return, horizon_days, risk):
 
 
 
-    final_decision, decision_reason, trade_return_pct, downside_risk_pct = final_trade_decision(
+    expected_return_pct = expected_return * 100
 
-        signal, confidence, expected_return, risk, buy_low, buy_high, target, stop_loss
 
-    )
+
+    if buy_high is not None:
+
+        trade_return_pct = ((target - buy_high) / buy_high) * 100
+
+        downside_risk_pct = ((buy_high - stop_loss) / buy_high) * 100
+
+    else:
+
+        trade_return_pct = expected_return_pct
+
+        downside_risk_pct = None
+
+
+
+    if expected_return_pct < 0:
+
+        final_decision = "WAIT / DO NOT BUY"
+
+        reason = "Estimated return is negative."
+
+    elif expected_return_pct < 1:
+
+        final_decision = "WAIT"
+
+        reason = "Expected return is too small."
+
+    elif risk == "High":
+
+        final_decision = "AVOID"
+
+        reason = "Risk is high."
+
+    elif "Avoid" in signal or "Sell" in signal:
+
+        final_decision = "AVOID"
+
+        reason = "Main signal is avoid/sell."
+
+    elif confidence < 70:
+
+        final_decision = "WAIT"
+
+        reason = "Confidence is not strong enough."
+
+    elif trade_return_pct < 2:
+
+        final_decision = "WATCH ONLY"
+
+        reason = "Trade return from buy zone to target is too small."
+
+    elif downside_risk_pct is not None and downside_risk_pct > 5:
+
+        final_decision = "WAIT"
+
+        reason = "Downside risk is too high."
+
+    elif signal in ["Strong Buy", "Buy Signal", "Buy on Dip"]:
+
+        final_decision = "BUY ON DIP"
+
+        reason = "Plan is valid, but entry should only happen inside the buy zone."
+
+    else:
+
+        final_decision = "WAIT"
+
+        reason = "Setup is not strong enough."
 
 
 
@@ -1302,33 +1264,161 @@ def trade_plan(latest, signal, confidence, expected_return, horizon_days, risk):
 
 
 
-    return pd.DataFrame({
+    return {
 
-        "Action": [action],
+        "Generated At": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
 
-        "Final Decision": [final_decision],
+        "Entry Price At Plan": round(close, 2),
 
-        "Decision Reason": [decision_reason],
+        "Action": action,
 
-        "Buy Zone Low": [round(buy_low, 2) if not pd.isna(buy_low) else None],
+        "Signal": signal,
 
-        "Buy Zone High": [round(buy_high, 2) if not pd.isna(buy_high) else None],
+        "Final Decision": final_decision,
 
-        "Target": [round(target, 2)],
+        "Decision Reason": reason,
 
-        "Stop Loss": [round(stop_loss, 2)],
+        "Buy Zone Low": round(buy_low, 2) if buy_low is not None else None,
 
-        "Expected Hold": [hold],
+        "Buy Zone High": round(buy_high, 2) if buy_high is not None else None,
 
-        "Confidence": [f"{confidence}%"],
+        "Target": round(target, 2),
 
-        "Estimated Return": [f"{expected_return:.2%}"],
+        "Stop Loss": round(stop_loss, 2),
 
-        "Trade Return From Buy Zone": [f"{trade_return_pct:.2f}%"],
+        "Expected Hold": hold,
 
-        "Downside Risk": [f"{downside_risk_pct:.2f}%" if not pd.isna(downside_risk_pct) else None]
+        "Confidence": confidence,
 
-    })
+        "Estimated Return %": round(expected_return_pct, 2),
+
+        "Trade Return From Buy Zone %": round(trade_return_pct, 2),
+
+        "Downside Risk %": round(downside_risk_pct, 2) if downside_risk_pct is not None else None,
+
+        "Risk": risk
+
+    }
+
+
+
+
+
+def live_plan_status(live_price, plan):
+
+    final_decision = plan.get("Final Decision")
+
+    buy_low = plan.get("Buy Zone Low")
+
+    buy_high = plan.get("Buy Zone High")
+
+    target = plan.get("Target")
+
+    stop_loss = plan.get("Stop Loss")
+
+
+
+    if final_decision in ["AVOID", "WAIT / DO NOT BUY"]:
+
+        return final_decision, plan.get("Decision Reason")
+
+
+
+    if buy_low is None or buy_high is None:
+
+        return "NO ENTRY ZONE", "This plan does not have a valid buy zone."
+
+
+
+    if live_price >= target:
+
+        return "TARGET HIT", "Price reached or passed the target."
+
+
+
+    if live_price <= stop_loss:
+
+        return "STOP LOSS HIT", "Price reached or passed the stop loss."
+
+
+
+    if buy_low <= live_price <= buy_high:
+
+        return "ENTRY ZONE HIT", "Price is inside the locked buy zone."
+
+
+
+    if live_price > buy_high:
+
+        return "WAIT / DO NOT CHASE", "Price is above the locked buy zone. Do not chase."
+
+
+
+    if live_price < buy_low:
+
+        return "WAIT / BELOW ZONE", "Price is below the buy zone. Wait for confirmation."
+
+
+
+    return "WAIT", "No action right now."
+
+
+
+
+
+def make_price_chart(df, ticker, title_suffix="", plan=None):
+
+    fig = go.Figure()
+
+
+
+    fig.add_trace(go.Scatter(x=df["Date"], y=df["Close"], mode="lines", name="Close"))
+
+    fig.add_trace(go.Scatter(x=df["Date"], y=df["MA9"], mode="lines", name="MA9"))
+
+    fig.add_trace(go.Scatter(x=df["Date"], y=df["MA20"], mode="lines", name="MA20"))
+
+    fig.add_trace(go.Scatter(x=df["Date"], y=df["MA50"], mode="lines", name="MA50"))
+
+    fig.add_trace(go.Scatter(x=df["Date"], y=df["VWAP"], mode="lines", name="VWAP"))
+
+
+
+    if plan is not None:
+
+        if plan.get("Buy Zone Low") is not None:
+
+            fig.add_hline(y=plan["Buy Zone Low"], line_dash="dot", annotation_text="Buy Zone Low")
+
+        if plan.get("Buy Zone High") is not None:
+
+            fig.add_hline(y=plan["Buy Zone High"], line_dash="dot", annotation_text="Buy Zone High")
+
+        if plan.get("Target") is not None:
+
+            fig.add_hline(y=plan["Target"], line_dash="dash", annotation_text="Target")
+
+        if plan.get("Stop Loss") is not None:
+
+            fig.add_hline(y=plan["Stop Loss"], line_dash="dash", annotation_text="Stop Loss")
+
+
+
+    fig.update_layout(
+
+        title=f"{ticker} Price Chart {title_suffix}",
+
+        xaxis_title="Date",
+
+        yaxis_title="Price",
+
+        height=500
+
+    )
+
+
+
+    return fig
 
 
 
@@ -1388,7 +1478,7 @@ def scanner_score(ticker, period, interval, market_score, market_label):
 
 
 
-    temp_plan = trade_plan(
+    temp_plan = build_locked_plan(
 
         latest,
 
@@ -1406,12 +1496,6 @@ def scanner_score(ticker, period, interval, market_score, market_label):
 
 
 
-    final_decision = temp_plan["Final Decision"].iloc[0]
-
-    decision_reason = temp_plan["Decision Reason"].iloc[0]
-
-
-
     return {
 
         "Ticker": ticker,
@@ -1420,9 +1504,9 @@ def scanner_score(ticker, period, interval, market_score, market_label):
 
         "Signal": scores["signal"],
 
-        "Final Decision": final_decision,
+        "Final Decision": temp_plan["Final Decision"],
 
-        "Decision Reason": decision_reason,
+        "Decision Reason": temp_plan["Decision Reason"],
 
         "Confidence": confidence,
 
@@ -1548,6 +1632,8 @@ with tab1:
 
             latest = df.iloc[-1]
 
+            live_price = safe_num(latest["Close"])
+
 
 
             short_scores = score_stock(latest, fundamentals, short_expected_return, news_score, market_score, market_label)
@@ -1562,39 +1648,9 @@ with tab1:
 
 
 
-            short_plan = trade_plan(
+            plan_key_short = f"locked_short_plan_{selected_ticker}_{mode}_{short_term_days}"
 
-                latest,
-
-                short_scores["signal"],
-
-                short_confidence,
-
-                short_expected_return,
-
-                short_term_days,
-
-                short_scores["risk"]
-
-            )
-
-
-
-            long_plan = trade_plan(
-
-                latest,
-
-                long_scores["signal"],
-
-                long_confidence,
-
-                long_expected_return,
-
-                long_term_days,
-
-                long_scores["risk"]
-
-            )
+            plan_key_long = f"locked_long_plan_{selected_ticker}_{mode}_{long_term_days}"
 
 
 
@@ -1602,69 +1658,165 @@ with tab1:
 
 
 
+            col_a, col_b, col_c = st.columns(3)
+
+
+
+            with col_a:
+
+                generate_short = st.button("Generate / Replace Short-Term Locked Plan")
+
+            with col_b:
+
+                generate_long = st.button("Generate / Replace Long-Term Locked Plan")
+
+            with col_c:
+
+                reset_plans = st.button("Reset Locked Plans")
+
+
+
+            if reset_plans:
+
+                if plan_key_short in st.session_state:
+
+                    del st.session_state[plan_key_short]
+
+                if plan_key_long in st.session_state:
+
+                    del st.session_state[plan_key_long]
+
+                st.success("Locked plans reset.")
+
+
+
+            if generate_short or plan_key_short not in st.session_state:
+
+                st.session_state[plan_key_short] = build_locked_plan(
+
+                    latest,
+
+                    short_scores["signal"],
+
+                    short_confidence,
+
+                    short_expected_return,
+
+                    short_term_days,
+
+                    short_scores["risk"]
+
+                )
+
+
+
+            if generate_long or plan_key_long not in st.session_state:
+
+                st.session_state[plan_key_long] = build_locked_plan(
+
+                    latest,
+
+                    long_scores["signal"],
+
+                    long_confidence,
+
+                    long_expected_return,
+
+                    long_term_days,
+
+                    long_scores["risk"]
+
+                )
+
+
+
+            short_plan = st.session_state[plan_key_short]
+
+            long_plan = st.session_state[plan_key_long]
+
+
+
+            short_live_status, short_live_reason = live_plan_status(live_price, short_plan)
+
+            long_live_status, long_live_reason = live_plan_status(live_price, long_plan)
+
+
+
             c1, c2, c3, c4, c5 = st.columns(5)
 
 
 
-            c1.metric("Live / Latest Price", f"${latest['Close']:.2f}")
+            c1.metric("Live / Latest Price", f"${live_price:.2f}")
 
-            c2.metric("Risk", short_scores["risk"])
+            c2.metric("Short Signal", short_plan["Signal"])
 
-            c3.metric(f"Short Signal ({short_term_days}d)", short_scores["signal"])
+            c3.metric("Short Locked Decision", short_plan["Final Decision"])
 
-            c4.metric("Short Final Decision", short_plan["Final Decision"].iloc[0])
+            c4.metric("Live Status", short_live_status)
 
             c5.metric("Market", market_label)
 
 
 
-            st.markdown("### Short-Term Trading Plan")
+            st.markdown("### Short-Term Locked Plan")
 
-            st.dataframe(short_plan, use_container_width=True)
+            short_plan_display = pd.DataFrame([short_plan])
+
+            short_plan_display["Live Price"] = round(live_price, 2)
+
+            short_plan_display["Live Status"] = short_live_status
+
+            short_plan_display["Live Status Reason"] = short_live_reason
+
+            st.dataframe(short_plan_display, use_container_width=True)
 
 
 
-            st.markdown("### Long-Term Trading Plan")
+            if short_live_status == "ENTRY ZONE HIT":
 
-            st.dataframe(long_plan, use_container_width=True)
+                st.success(short_live_reason)
+
+            elif short_live_status in ["WAIT / DO NOT CHASE", "WAIT", "WAIT / BELOW ZONE"]:
+
+                st.warning(short_live_reason)
+
+            elif short_live_status in ["TARGET HIT"]:
+
+                st.success(short_live_reason)
+
+            elif short_live_status in ["STOP LOSS HIT", "AVOID", "WAIT / DO NOT BUY"]:
+
+                st.error(short_live_reason)
+
+
+
+            st.markdown("### Long-Term Locked Plan")
+
+            long_plan_display = pd.DataFrame([long_plan])
+
+            long_plan_display["Live Price"] = round(live_price, 2)
+
+            long_plan_display["Live Status"] = long_live_status
+
+            long_plan_display["Live Status Reason"] = long_live_reason
+
+            st.dataframe(long_plan_display, use_container_width=True)
 
 
 
             st.info(
 
-                f"Short-term Signal: {short_scores['signal']} | "
+                f"Important: Live price updates every 60 seconds, but locked Buy Zone / Target / Stop Loss "
 
-                f"Final Decision: {short_plan['Final Decision'].iloc[0]} | "
-
-                f"Confidence: {short_confidence}% | "
-
-                f"Estimated Return: {short_expected_return:.2%} | "
-
-                f"News: {news_label}"
+                f"do not change unless you click Generate / Replace Plan."
 
             )
 
 
 
-            st.info(
+            st.markdown("### Price Chart with Locked Plan Lines")
 
-                f"Long-term Signal: {long_scores['signal']} | "
-
-                f"Final Decision: {long_plan['Final Decision'].iloc[0]} | "
-
-                f"Confidence: {long_confidence}% | "
-
-                f"Estimated Return: {long_expected_return:.2%} | "
-
-                f"Market: {market_label}"
-
-            )
-
-
-
-            st.markdown("### Price Chart")
-
-            st.plotly_chart(make_price_chart(df, selected_ticker, f"({mode})"), use_container_width=True)
+            st.plotly_chart(make_price_chart(df, selected_ticker, f"({mode})", short_plan), use_container_width=True)
 
 
 
@@ -1682,7 +1834,7 @@ with tab1:
 
                     st.markdown("### 5-Year Historical Chart")
 
-                    st.plotly_chart(make_price_chart(hist_df, selected_ticker, "(5-Year Historical)"), use_container_width=True)
+                    st.plotly_chart(make_price_chart(hist_df, selected_ticker, "(5-Year Historical)", long_plan), use_container_width=True)
 
 
 

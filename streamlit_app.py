@@ -12,9 +12,13 @@ import plotly.graph_objects as go
 
 from datetime import datetime, timedelta
 
+from streamlit_autorefresh import st_autorefresh
+
 
 
 st.set_page_config(page_title="AI Trading Signal App", layout="wide")
+
+st_autorefresh(interval=30000, key="refresh")
 
 
 
@@ -50,7 +54,7 @@ def safe_num(x, default=0):
 
 
 
-@st.cache_data(ttl=86400)
+@st.cache_data(ttl=60)
 
 def get_all_tickers():
 
@@ -114,7 +118,7 @@ def get_all_tickers():
 
 
 
-@st.cache_data(ttl=600)
+@st.cache_data(ttl=60)
 
 def load_price_data(ticker, period, interval):
 
@@ -178,7 +182,7 @@ def load_price_data(ticker, period, interval):
 
 
 
-@st.cache_data(ttl=3600)
+@st.cache_data(ttl=60)
 
 def load_fundamentals(ticker):
 
@@ -224,7 +228,7 @@ def load_fundamentals(ticker):
 
 
 
-@st.cache_data(ttl=1800)
+@st.cache_data(ttl=60)
 
 def load_news_sentiment(ticker):
 
@@ -504,7 +508,7 @@ def add_indicators(df):
 
 
 
-@st.cache_data(ttl=900)
+@st.cache_data(ttl=60)
 
 def get_market_direction():
 

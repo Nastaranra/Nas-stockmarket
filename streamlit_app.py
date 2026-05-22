@@ -18,8 +18,6 @@ from streamlit_autorefresh import st_autorefresh
 
 st.set_page_config(page_title="AI Trading Signal App", layout="wide")
 
-st_autorefresh(interval=30000, key="refresh")
-
 
 
 st.title("📈 AI Trading Signal App")
@@ -27,6 +25,12 @@ st.title("📈 AI Trading Signal App")
 st.caption("Technical + Fundamental + News + Market Direction + Trading Plan")
 
 st.warning("Educational only. Not financial advice. No signal is guaranteed.")
+
+
+
+# Auto refresh
+
+st_autorefresh(interval=60 * 1000, key="live_refresh")
 
 
 
@@ -54,7 +58,7 @@ def safe_num(x, default=0):
 
 
 
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=86400)
 
 def get_all_tickers():
 
@@ -104,8 +108,6 @@ def get_all_tickers():
 
     clean = sorted(list(set(clean)))
 
-
-
     if not clean:
 
         clean = FALLBACK
@@ -118,7 +120,7 @@ def get_all_tickers():
 
 
 
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=30)
 
 def load_price_data(ticker, period, interval):
 
@@ -182,15 +184,13 @@ def load_price_data(ticker, period, interval):
 
 
 
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=3600)
 
 def load_fundamentals(ticker):
 
     try:
 
         info = yf.Ticker(ticker).info
-
-
 
         return {
 
@@ -218,8 +218,6 @@ def load_fundamentals(ticker):
 
         }
 
-
-
     except Exception:
 
         return {}
@@ -228,7 +226,7 @@ def load_fundamentals(ticker):
 
 
 
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=1800)
 
 def load_news_sentiment(ticker):
 
@@ -252,17 +250,7 @@ def load_news_sentiment(ticker):
 
         url = "https://finnhub.io/api/v1/company-news"
 
-        params = {
-
-            "symbol": ticker,
-
-            "from": str(start),
-
-            "to": str(today),
-
-            "token": api_key
-
-        }
+        params = {"symbol": ticker, "from": str(start), "to": str(today), "token": api_key}
 
 
 
@@ -508,7 +496,7 @@ def add_indicators(df):
 
 
 
-@st.cache_data(ttl=60)
+@st.cache_data(ttl=300)
 
 def get_market_direction():
 
@@ -1146,7 +1134,81 @@ def confidence_score(scores, expected_return, news_score):
 
 
 
-def trade_plan(latest, signal, confidence, expected_return, horizon_days):
+def final_trade_decision(signal, confidence, expected_return, risk, buy_low, buy_high, target, stop_loss):
+
+    expected_return_pct = expected_return * 100
+
+
+
+    if buy_high is not None and not pd.isna(buy_high):
+
+        trade_return_pct = ((target - buy_high) / buy_high) * 100
+
+        downside_risk_pct = ((buy_high - stop_loss) / buy_high) * 100
+
+    else:
+
+        trade_return_pct = expected_return_pct
+
+        downside_risk_pct = np.nan
+
+
+
+    if expected_return_pct < 0:
+
+        return "WAIT / DO NOT BUY", "Estimated return is negative.", trade_return_pct, downside_risk_pct
+
+
+
+    if expected_return_pct < 1:
+
+        return "WAIT", "Expected return is too small.", trade_return_pct, downside_risk_pct
+
+
+
+    if risk == "High":
+
+        return "AVOID", "Risk is high.", trade_return_pct, downside_risk_pct
+
+
+
+    if "Avoid" in signal or "Sell" in signal:
+
+        return "AVOID", "Main signal is avoid/sell.", trade_return_pct, downside_risk_pct
+
+
+
+    if confidence < 70:
+
+        return "WAIT", "Confidence is not strong enough.", trade_return_pct, downside_risk_pct
+
+
+
+    if trade_return_pct < 2:
+
+        return "WATCH ONLY", "Trade return from buy zone to target is too small.", trade_return_pct, downside_risk_pct
+
+
+
+    if not pd.isna(downside_risk_pct) and downside_risk_pct > 5:
+
+        return "WAIT", "Downside risk is too high.", trade_return_pct, downside_risk_pct
+
+
+
+    if signal in ["Strong Buy", "Buy Signal", "Buy on Dip"]:
+
+        return "BUY ON DIP", "Confidence, return, and risk/reward look acceptable.", trade_return_pct, downside_risk_pct
+
+
+
+    return "WAIT", "Setup is not strong enough.", trade_return_pct, downside_risk_pct
+
+
+
+
+
+def trade_plan(latest, signal, confidence, expected_return, horizon_days, risk):
 
     close = safe_num(latest["Close"])
 
@@ -1170,6 +1232,8 @@ def trade_plan(latest, signal, confidence, expected_return, horizon_days):
 
         action = "BUY SETUP"
 
+
+
     elif signal == "Buy on Dip":
 
         buy_low = max(support, close - 1.2 * atr)
@@ -1181,6 +1245,8 @@ def trade_plan(latest, signal, confidence, expected_return, horizon_days):
         stop_loss = buy_low - 1.0 * atr
 
         action = "BUY ON DIP"
+
+
 
     elif "Sell" in signal or "Avoid" in signal:
 
@@ -1194,6 +1260,8 @@ def trade_plan(latest, signal, confidence, expected_return, horizon_days):
 
         action = "AVOID / SELL SETUP"
 
+
+
     else:
 
         buy_low = close - 0.6 * atr
@@ -1205,6 +1273,14 @@ def trade_plan(latest, signal, confidence, expected_return, horizon_days):
         stop_loss = close - 1.0 * atr
 
         action = "WAIT / HOLD SETUP"
+
+
+
+    final_decision, decision_reason, trade_return_pct, downside_risk_pct = final_trade_decision(
+
+        signal, confidence, expected_return, risk, buy_low, buy_high, target, stop_loss
+
+    )
 
 
 
@@ -1230,6 +1306,10 @@ def trade_plan(latest, signal, confidence, expected_return, horizon_days):
 
         "Action": [action],
 
+        "Final Decision": [final_decision],
+
+        "Decision Reason": [decision_reason],
+
         "Buy Zone Low": [round(buy_low, 2) if not pd.isna(buy_low) else None],
 
         "Buy Zone High": [round(buy_high, 2) if not pd.isna(buy_high) else None],
@@ -1242,7 +1322,11 @@ def trade_plan(latest, signal, confidence, expected_return, horizon_days):
 
         "Confidence": [f"{confidence}%"],
 
-        "Estimated Return": [f"{expected_return:.2%}"]
+        "Estimated Return": [f"{expected_return:.2%}"],
+
+        "Trade Return From Buy Zone": [f"{trade_return_pct:.2f}%"],
+
+        "Downside Risk": [f"{downside_risk_pct:.2f}%" if not pd.isna(downside_risk_pct) else None]
 
     })
 
@@ -1304,6 +1388,30 @@ def scanner_score(ticker, period, interval, market_score, market_label):
 
 
 
+    temp_plan = trade_plan(
+
+        latest,
+
+        scores["signal"],
+
+        confidence,
+
+        expected_return,
+
+        5,
+
+        scores["risk"]
+
+    )
+
+
+
+    final_decision = temp_plan["Final Decision"].iloc[0]
+
+    decision_reason = temp_plan["Decision Reason"].iloc[0]
+
+
+
     return {
 
         "Ticker": ticker,
@@ -1311,6 +1419,10 @@ def scanner_score(ticker, period, interval, market_score, market_label):
         "Price": round(safe_num(latest["Close"]), 2),
 
         "Signal": scores["signal"],
+
+        "Final Decision": final_decision,
+
+        "Decision Reason": decision_reason,
 
         "Confidence": confidence,
 
@@ -1386,6 +1498,8 @@ st.sidebar.write(f"Available tickers loaded: {len(tickers)}")
 
 st.sidebar.write(f"Market: {market_label}")
 
+st.sidebar.write(f"Last refresh: {datetime.now().strftime('%H:%M:%S')}")
+
 
 
 selected_ticker = st.sidebar.selectbox("Select one stock", tickers)
@@ -1448,9 +1562,39 @@ with tab1:
 
 
 
-            short_plan = trade_plan(latest, short_scores["signal"], short_confidence, short_expected_return, short_term_days)
+            short_plan = trade_plan(
 
-            long_plan = trade_plan(latest, long_scores["signal"], long_confidence, long_expected_return, long_term_days)
+                latest,
+
+                short_scores["signal"],
+
+                short_confidence,
+
+                short_expected_return,
+
+                short_term_days,
+
+                short_scores["risk"]
+
+            )
+
+
+
+            long_plan = trade_plan(
+
+                latest,
+
+                long_scores["signal"],
+
+                long_confidence,
+
+                long_expected_return,
+
+                long_term_days,
+
+                long_scores["risk"]
+
+            )
 
 
 
@@ -1462,13 +1606,13 @@ with tab1:
 
 
 
-            c1.metric("Current Price", f"${latest['Close']:.2f}")
+            c1.metric("Live / Latest Price", f"${latest['Close']:.2f}")
 
             c2.metric("Risk", short_scores["risk"])
 
             c3.metric(f"Short Signal ({short_term_days}d)", short_scores["signal"])
 
-            c4.metric(f"Long Signal ({long_term_days}d)", long_scores["signal"])
+            c4.metric("Short Final Decision", short_plan["Final Decision"].iloc[0])
 
             c5.metric("Market", market_label)
 
@@ -1488,9 +1632,15 @@ with tab1:
 
             st.info(
 
-                f"Short-term: {short_scores['signal']} | Confidence: {short_confidence}% | "
+                f"Short-term Signal: {short_scores['signal']} | "
 
-                f"Estimated Return: {short_expected_return:.2%} | News: {news_label}"
+                f"Final Decision: {short_plan['Final Decision'].iloc[0]} | "
+
+                f"Confidence: {short_confidence}% | "
+
+                f"Estimated Return: {short_expected_return:.2%} | "
+
+                f"News: {news_label}"
 
             )
 
@@ -1498,9 +1648,15 @@ with tab1:
 
             st.info(
 
-                f"Long-term: {long_scores['signal']} | Confidence: {long_confidence}% | "
+                f"Long-term Signal: {long_scores['signal']} | "
 
-                f"Estimated Return: {long_expected_return:.2%} | Market: {market_label}"
+                f"Final Decision: {long_plan['Final Decision'].iloc[0]} | "
+
+                f"Confidence: {long_confidence}% | "
+
+                f"Estimated Return: {long_expected_return:.2%} | "
+
+                f"Market: {market_label}"
 
             )
 
@@ -1670,27 +1826,21 @@ with tab2:
 
         order = {
 
-            "Strong Buy": 1,
+            "BUY ON DIP": 1,
 
-            "Buy Signal": 2,
+            "WATCH ONLY": 2,
 
-            "Buy on Dip": 3,
+            "WAIT": 3,
 
-            "Hold / Wait": 4,
+            "WAIT / DO NOT BUY": 4,
 
-            "Wait for Market Confirmation": 5,
-
-            "Avoid / Negative News": 6,
-
-            "Avoid / High Risk": 7,
-
-            "Sell / High Caution": 8
+            "AVOID": 5
 
         }
 
 
 
-        scanner_df["Sort"] = scanner_df["Signal"].map(order).fillna(9)
+        scanner_df["Sort"] = scanner_df["Final Decision"].map(order).fillna(9)
 
 
 

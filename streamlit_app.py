@@ -20,13 +20,21 @@ st.set_page_config(page_title="AI Trading Signal App", layout="wide")
 
 st.title("📈 AI Trading Signal App")
 
-st.caption("Live Price + Trading Plan + Technical + Fundamental + News + Market Direction")
+st.caption("Technical + Fundamental + News + Market Direction + Trading Plan")
 
 st.warning("Educational only. Not financial advice. No signal is guaranteed.")
 
 
 
-FALLBACK = ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "SPY", "QQQ"]
+if st.button("Clear cache / Refresh data"):
+
+    st.cache_data.clear()
+
+    st.rerun()
+
+
+
+FALLBACK = ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "GOOG", "META", "TSLA", "SPY", "QQQ"]
 
 
 
@@ -54,73 +62,7 @@ def safe_num(x, default=0):
 
 def get_all_tickers():
 
-    tickers = []
-
-
-
-    try:
-
-        df1 = pd.read_csv(
-
-            "https://www.nasdaqtrader.com/dynamic/SymDir/nasdaqlisted.txt",
-
-            sep="|"
-
-        )
-
-        df1 = df1[df1["Test Issue"] == "N"]
-
-        tickers += df1["Symbol"].astype(str).tolist()
-
-    except Exception:
-
-        pass
-
-
-
-    try:
-
-        df2 = pd.read_csv(
-
-            "https://www.nasdaqtrader.com/dynamic/SymDir/otherlisted.txt",
-
-            sep="|"
-
-        )
-
-        df2 = df2[df2["Test Issue"] == "N"]
-
-        tickers += df2["ACT Symbol"].astype(str).tolist()
-
-    except Exception:
-
-        pass
-
-
-
-    clean = []
-
-    for t in tickers:
-
-        t = str(t).strip().replace(".", "-")
-
-        if len(t) <= 6 and "$" not in t and " " not in t and t.upper() != "FILE":
-
-            clean.append(t)
-
-
-
-    clean = sorted(list(set(clean)))
-
-
-
-    if not clean:
-
-        clean = FALLBACK
-
-
-
-    return clean, pd.DataFrame({"Ticker": clean})
+    return FALLBACK, pd.DataFrame({"Ticker": FALLBACK})
 
 
 
@@ -129,6 +71,10 @@ def get_all_tickers():
 @st.cache_data(ttl=600)
 
 def load_price_data(ticker, period, interval):
+
+    ticker = str(ticker).upper().strip()
+
+
 
     try:
 
@@ -170,49 +116,95 @@ def load_price_data(ticker, period, interval):
 
 
 
-        if df is None or df.empty:
+        if df is not None and not df.empty:
 
-            return pd.DataFrame()
-
-
-
-        df = df.reset_index()
+            df = df.reset_index()
 
 
 
-        if isinstance(df.columns, pd.MultiIndex):
+            if isinstance(df.columns, pd.MultiIndex):
 
-            df.columns = df.columns.get_level_values(0)
-
-
-
-        if "Datetime" in df.columns:
-
-            df = df.rename(columns={"Datetime": "Date"})
+                df.columns = df.columns.get_level_values(0)
 
 
 
-        if "Date" not in df.columns:
+            if "Datetime" in df.columns:
 
-            return pd.DataFrame()
-
-
-
-        if "Close" not in df.columns:
-
-            return pd.DataFrame()
+                df = df.rename(columns={"Datetime": "Date"})
 
 
 
-        df = df.dropna(subset=["Close"])
+            if "Date" in df.columns and "Close" in df.columns:
 
-        return df
+                df = df.dropna(subset=["Close"])
+
+                if not df.empty:
+
+                    return df
 
 
 
     except Exception:
 
-        return pd.DataFrame()
+        pass
+
+
+
+    try:
+
+        url = f"https://stooq.com/q/d/l/?s={ticker.lower()}.us&i=d"
+
+        df = pd.read_csv(url)
+
+
+
+        if df is not None and not df.empty and "Close" in df.columns:
+
+            df["Date"] = pd.to_datetime(df["Date"])
+
+            df = df.sort_values("Date")
+
+
+
+            if period == "5d":
+
+                df = df.tail(30)
+
+            elif period == "1mo":
+
+                df = df.tail(30)
+
+            elif period == "6mo":
+
+                df = df.tail(126)
+
+            elif period == "1y":
+
+                df = df.tail(252)
+
+            elif period == "5y":
+
+                df = df.tail(1260)
+
+            else:
+
+                df = df.tail(252)
+
+
+
+            df = df.dropna(subset=["Close"])
+
+            return df
+
+
+
+    except Exception:
+
+        pass
+
+
+
+    return pd.DataFrame()
 
 
 
@@ -428,17 +420,23 @@ def add_indicators(df):
 
 
 
+    if df.empty or "Close" not in df.columns:
+
+        return pd.DataFrame()
+
+
+
     df["Return"] = df["Close"].pct_change()
 
 
 
-    df["MA9"] = df["Close"].rolling(9).mean()
+    df["MA9"] = df["Close"].rolling(9, min_periods=5).mean()
 
-    df["MA20"] = df["Close"].rolling(20).mean()
+    df["MA20"] = df["Close"].rolling(20, min_periods=10).mean()
 
-    df["MA50"] = df["Close"].rolling(50).mean()
+    df["MA50"] = df["Close"].rolling(50, min_periods=20).mean()
 
-    df["MA200"] = df["Close"].rolling(200).mean()
+    df["MA200"] = df["Close"].rolling(200, min_periods=50).mean()
 
 
 
@@ -446,7 +444,7 @@ def add_indicators(df):
 
     df["Return_20"] = df["Close"].pct_change(20)
 
-    df["Volatility"] = df["Return"].rolling(20).std() * np.sqrt(252)
+    df["Volatility"] = df["Return"].rolling(20, min_periods=10).std() * np.sqrt(252)
 
 
 
@@ -458,13 +456,13 @@ def add_indicators(df):
 
 
 
-    avg_gain = gain.rolling(14).mean()
+    avg_gain = gain.rolling(14, min_periods=7).mean()
 
-    avg_loss = loss.rolling(14).mean()
+    avg_loss = loss.rolling(14, min_periods=7).mean()
 
 
 
-    rs = avg_gain / avg_loss
+    rs = avg_gain / avg_loss.replace(0, np.nan)
 
     df["RSI"] = 100 - (100 / (1 + rs))
 
@@ -490,19 +488,19 @@ def add_indicators(df):
 
         df["TR"] = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
 
-        df["ATR"] = df["TR"].rolling(14).mean()
+        df["ATR"] = df["TR"].rolling(14, min_periods=7).mean()
 
     else:
 
-        df["ATR"] = df["Close"].rolling(14).std()
+        df["ATR"] = df["Close"].rolling(14, min_periods=7).std()
 
 
 
     if "Volume" in df.columns:
 
-        df["Volume_MA20"] = df["Volume"].rolling(20).mean()
+        df["Volume_MA20"] = df["Volume"].rolling(20, min_periods=10).mean()
 
-        df["Volume_Ratio"] = df["Volume"] / df["Volume_MA20"]
+        df["Volume_Ratio"] = df["Volume"] / df["Volume_MA20"].replace(0, np.nan)
 
 
 
@@ -528,15 +526,33 @@ def add_indicators(df):
 
 
 
-    df["Support"] = df["Close"].rolling(30).min()
+    df["Support"] = df["Close"].rolling(30, min_periods=10).min()
 
-    df["Resistance"] = df["Close"].rolling(30).max()
+    df["Resistance"] = df["Close"].rolling(30, min_periods=10).max()
 
 
 
     df = df.replace([np.inf, -np.inf], np.nan)
 
-    return df.dropna()
+
+
+    needed_cols = [
+
+        "Close", "MA9", "MA20", "MA50",
+
+        "RSI", "MACD", "MACD_Signal",
+
+        "ATR", "Support", "Resistance"
+
+    ]
+
+
+
+    needed_cols = [c for c in needed_cols if c in df.columns]
+
+
+
+    return df.dropna(subset=needed_cols)
 
 
 
@@ -560,19 +576,9 @@ def get_market_direction():
 
 
 
-        spy["MA20"] = spy["Close"].rolling(20).mean()
+        spy = add_indicators(spy)
 
-        spy["MA50"] = spy["Close"].rolling(50).mean()
-
-        qqq["MA20"] = qqq["Close"].rolling(20).mean()
-
-        qqq["MA50"] = qqq["Close"].rolling(50).mean()
-
-
-
-        spy = spy.dropna()
-
-        qqq = qqq.dropna()
+        qqq = add_indicators(qqq)
 
 
 
@@ -638,7 +644,7 @@ def estimate_future_price(df, days):
 
 
 
-    if len(recent) < 60:
+    if len(recent) < 30:
 
         return pd.DataFrame(), 0, "Not enough data"
 
@@ -1360,21 +1366,15 @@ mode = st.sidebar.selectbox(
 
     "Trading mode",
 
-    ["Intraday / Short-term", "Swing / Multi-day", "Historical / Long-term"],
+    ["Swing / Multi-day", "Historical / Long-term"],
 
-    index=1
+    index=0
 
 )
 
 
 
-if mode == "Intraday / Short-term":
-
-    period = "5d"
-
-    interval = "5m"
-
-elif mode == "Swing / Multi-day":
+if mode == "Swing / Multi-day":
 
     period = "1y"
 
@@ -1394,7 +1394,7 @@ long_term_days = st.sidebar.selectbox("Long-term horizon", [30, 60, 90, 120, 180
 
 
 
-scan_count = st.sidebar.selectbox("How many stocks to scan?", [10, 25, 50, 100, 200], index=1)
+scan_count = st.sidebar.selectbox("How many stocks to scan?", [5, 10, 25, 50], index=1)
 
 scan_count = min(scan_count, len(tickers))
 
@@ -1406,27 +1406,13 @@ st.sidebar.write(f"Market: {market_label}")
 
 
 
-default_ticker = "AAPL"
-
-
-
-if default_ticker in tickers:
-
-    default_index = tickers.index(default_ticker)
-
-else:
-
-    default_index = 0
-
-
-
 selected_ticker = st.sidebar.selectbox(
 
     "Select one stock",
 
     tickers,
 
-    index=default_index
+    index=0
 
 )
 
@@ -1446,7 +1432,7 @@ with tab1:
 
     if df.empty:
 
-        st.error("Could not load data. Try another ticker like AAPL, MSFT, NVDA, SPY, or QQQ.")
+        st.error("Could not load data. Try AAPL, MSFT, NVDA, SPY, or QQQ.")
 
     else:
 
@@ -1456,7 +1442,7 @@ with tab1:
 
         if df.empty:
 
-            st.error("Not enough data for indicators. Try Swing / Multi-day mode.")
+            st.error("Not enough data for indicators. Try Historical / Long-term mode.")
 
         else:
 

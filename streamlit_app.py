@@ -1,4 +1,4 @@
-import streamlit as st
+mport streamlit as st
 
 import yfinance as yf
 
@@ -11,6 +11,8 @@ import requests
 import plotly.graph_objects as go
 
 from datetime import datetime, timedelta
+
+from io import StringIO
 
 
 
@@ -76,55 +78,61 @@ def load_price_data(ticker, period, interval):
 
 
 
-    # Use Stooq first because it is more stable on Streamlit Cloud
-
     try:
 
         url = f"https://stooq.com/q/d/l/?s={ticker.lower()}.us&i=d"
 
-        df = pd.read_csv(url)
+        response = requests.get(url, timeout=8)
 
 
 
-        if df is not None and not df.empty and "Close" in df.columns:
+        if response.status_code == 200 and response.text.strip():
 
-            df["Date"] = pd.to_datetime(df["Date"])
-
-            df = df.sort_values("Date")
+            df = pd.read_csv(StringIO(response.text))
 
 
 
-            if period == "5d":
+            if df is not None and not df.empty and "Close" in df.columns:
 
-                df = df.tail(30)
+                df["Date"] = pd.to_datetime(df["Date"])
 
-            elif period == "1mo":
-
-                df = df.tail(30)
-
-            elif period == "6mo":
-
-                df = df.tail(126)
-
-            elif period == "1y":
-
-                df = df.tail(252)
-
-            elif period == "5y":
-
-                df = df.tail(1260)
-
-            else:
-
-                df = df.tail(252)
+                df = df.sort_values("Date")
 
 
 
-            df = df.dropna(subset=["Close"])
+                if period == "5d":
 
-            if not df.empty:
+                    df = df.tail(30)
 
-                return df
+                elif period == "1mo":
+
+                    df = df.tail(30)
+
+                elif period == "6mo":
+
+                    df = df.tail(126)
+
+                elif period == "1y":
+
+                    df = df.tail(252)
+
+                elif period == "5y":
+
+                    df = df.tail(1260)
+
+                else:
+
+                    df = df.tail(252)
+
+
+
+                df = df.dropna(subset=["Close"])
+
+
+
+                if not df.empty:
+
+                    return df
 
 
 
@@ -133,8 +141,6 @@ def load_price_data(ticker, period, interval):
         pass
 
 
-
-    # Backup: Yahoo Finance
 
     try:
 
@@ -152,7 +158,7 @@ def load_price_data(ticker, period, interval):
 
             threads=False,
 
-            timeout=10
+            timeout=8
 
         )
 
@@ -276,7 +282,7 @@ def load_news_sentiment(ticker):
 
 
 
-        response = requests.get(url, params=params, timeout=10)
+        response = requests.get(url, params=params, timeout=8)
 
 
 
@@ -1402,7 +1408,9 @@ tab1, tab2, tab3 = st.tabs(["Single Stock", "Scanner", "Ticker List"])
 
 with tab1:
 
-    df = load_price_data(selected_ticker, period, interval)
+    with st.spinner("Loading price data..."):
+
+        df = load_price_data(selected_ticker, period, interval)
 
 
 
@@ -1461,6 +1469,8 @@ with tab1:
 
 
             c1, c2, c3, c4, c5 = st.columns(5)
+
+
 
             c1.metric("Current Price", f"${latest['Close']:.2f}")
 
@@ -1542,6 +1552,8 @@ with tab1:
 
             })
 
+
+
             st.dataframe(score_df, use_container_width=True)
 
 
@@ -1549,6 +1561,14 @@ with tab1:
             st.markdown("### Why Short-Term Signal?")
 
             for r in short_scores["reasons"]:
+
+                st.write(f"- {r}")
+
+
+
+            st.markdown("### Why Long-Term Signal?")
+
+            for r in long_scores["reasons"]:
 
                 st.write(f"- {r}")
 
@@ -1588,6 +1608,8 @@ with tab2:
 
     st.subheader("Scanner")
 
+
+
     rows = []
 
     progress = st.progress(0)
@@ -1598,9 +1620,13 @@ with tab2:
 
         result = scanner_score(ticker, period, interval, market_score, market_label)
 
+
+
         if result is not None:
 
             rows.append(result)
+
+
 
         progress.progress((i + 1) / scan_count)
 
@@ -1635,6 +1661,8 @@ with tab2:
 
 
         scanner_df["Sort"] = scanner_df["Signal"].map(order).fillna(9)
+
+
 
         scanner_df = scanner_df.sort_values(
 

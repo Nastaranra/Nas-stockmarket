@@ -28,7 +28,7 @@ st.warning("Educational only. Not financial advice. No signal is guaranteed.")
 
 
 
-st_autorefresh(interval=60 * 1000, key="live_refresh")
+st_autorefresh(interval=180 * 1000, key="live_refresh")
 
 
 

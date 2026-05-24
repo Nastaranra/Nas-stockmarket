@@ -12,8 +12,6 @@ import plotly.graph_objects as go
 
 from datetime import datetime, timedelta
 
-from streamlit_autorefresh import st_autorefresh
-
 
 
 st.set_page_config(page_title="AI Trading Signal App", layout="wide")
@@ -22,17 +20,13 @@ st.set_page_config(page_title="AI Trading Signal App", layout="wide")
 
 st.title("📈 AI Trading Signal App")
 
-st.caption("Live Price + Locked Trading Plan + Technical + Fundamental + News + Market Direction")
+st.caption("Live Price + Trading Plan + Technical + Fundamental + News + Market Direction")
 
 st.warning("Educational only. Not financial advice. No signal is guaranteed.")
 
 
 
-st_autorefresh(interval=180 * 1000, key="live_refresh")
-
-
-
-FALLBACK = ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "GOOG", "META", "TSLA", "SPY", "QQQ"]
+FALLBACK = ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA", "SPY", "QQQ"]
 
 
 
@@ -66,7 +60,13 @@ def get_all_tickers():
 
     try:
 
-        df1 = pd.read_csv("https://www.nasdaqtrader.com/dynamic/SymDir/nasdaqlisted.txt", sep="|")
+        df1 = pd.read_csv(
+
+            "https://www.nasdaqtrader.com/dynamic/SymDir/nasdaqlisted.txt",
+
+            sep="|"
+
+        )
 
         df1 = df1[df1["Test Issue"] == "N"]
 
@@ -80,7 +80,13 @@ def get_all_tickers():
 
     try:
 
-        df2 = pd.read_csv("https://www.nasdaqtrader.com/dynamic/SymDir/otherlisted.txt", sep="|")
+        df2 = pd.read_csv(
+
+            "https://www.nasdaqtrader.com/dynamic/SymDir/otherlisted.txt",
+
+            sep="|"
+
+        )
 
         df2 = df2[df2["Test Issue"] == "N"]
 
@@ -106,6 +112,8 @@ def get_all_tickers():
 
     clean = sorted(list(set(clean)))
 
+
+
     if not clean:
 
         clean = FALLBACK
@@ -118,7 +126,7 @@ def get_all_tickers():
 
 
 
-@st.cache_data(ttl=30)
+@st.cache_data(ttl=600)
 
 def load_price_data(ticker, period, interval):
 
@@ -144,6 +152,26 @@ def load_price_data(ticker, period, interval):
 
         if df is None or df.empty:
 
+            df = yf.download(
+
+                ticker,
+
+                period="1y",
+
+                interval="1d",
+
+                auto_adjust=True,
+
+                progress=False,
+
+                threads=False
+
+            )
+
+
+
+        if df is None or df.empty:
+
             return pd.DataFrame()
 
 
@@ -164,11 +192,19 @@ def load_price_data(ticker, period, interval):
 
 
 
-        if "Date" not in df.columns or "Close" not in df.columns:
+        if "Date" not in df.columns:
 
             return pd.DataFrame()
 
 
+
+        if "Close" not in df.columns:
+
+            return pd.DataFrame()
+
+
+
+        df = df.dropna(subset=["Close"])
 
         return df
 
@@ -340,7 +376,9 @@ def load_news_sentiment(ticker):
 
             rows.append({
 
-                "Date": datetime.fromtimestamp(item.get("datetime")).strftime("%Y-%m-%d") if item.get("datetime") else None,
+                "Date": datetime.fromtimestamp(item.get("datetime")).strftime("%Y-%m-%d")
+
+                if item.get("datetime") else None,
 
                 "Headline": headline,
 
@@ -504,37 +542,21 @@ def add_indicators(df):
 
 
 
-@st.cache_data(ttl=300)
+@st.cache_data(ttl=900)
 
 def get_market_direction():
 
     try:
 
-        spy = yf.download("SPY", period="6mo", interval="1d", auto_adjust=True, progress=False, threads=False)
+        spy = load_price_data("SPY", "1y", "1d")
 
-        qqq = yf.download("QQQ", period="6mo", interval="1d", auto_adjust=True, progress=False, threads=False)
+        qqq = load_price_data("QQQ", "1y", "1d")
 
 
 
-        if spy is None or spy.empty or qqq is None or qqq.empty:
+        if spy.empty or qqq.empty:
 
             return 0, "Unknown Market"
-
-
-
-        spy = spy.reset_index()
-
-        qqq = qqq.reset_index()
-
-
-
-        if isinstance(spy.columns, pd.MultiIndex):
-
-            spy.columns = spy.columns.get_level_values(0)
-
-        if isinstance(qqq.columns, pd.MultiIndex):
-
-            qqq.columns = qqq.columns.get_level_values(0)
 
 
 
@@ -699,6 +721,44 @@ def estimate_future_price(df, days):
 
 
     return out, expected_return, label
+
+
+
+
+
+def make_price_chart(df, ticker, title_suffix=""):
+
+    fig = go.Figure()
+
+
+
+    fig.add_trace(go.Scatter(x=df["Date"], y=df["Close"], mode="lines", name="Close"))
+
+    fig.add_trace(go.Scatter(x=df["Date"], y=df["MA9"], mode="lines", name="MA9"))
+
+    fig.add_trace(go.Scatter(x=df["Date"], y=df["MA20"], mode="lines", name="MA20"))
+
+    fig.add_trace(go.Scatter(x=df["Date"], y=df["MA50"], mode="lines", name="MA50"))
+
+    fig.add_trace(go.Scatter(x=df["Date"], y=df["VWAP"], mode="lines", name="VWAP"))
+
+
+
+    fig.update_layout(
+
+        title=f"{ticker} Price Chart {title_suffix}",
+
+        xaxis_title="Date",
+
+        yaxis_title="Price",
+
+        height=500
+
+    )
+
+
+
+    return fig
 
 
 
@@ -1104,7 +1164,7 @@ def confidence_score(scores, expected_return, news_score):
 
 
 
-def build_locked_plan(latest, signal, confidence, expected_return, horizon_days, risk):
+def trade_plan(latest, signal, confidence, expected_return, horizon_days):
 
     close = safe_num(latest["Close"])
 
@@ -1128,8 +1188,6 @@ def build_locked_plan(latest, signal, confidence, expected_return, horizon_days,
 
         action = "BUY SETUP"
 
-
-
     elif signal == "Buy on Dip":
 
         buy_low = max(support, close - 1.2 * atr)
@@ -1142,21 +1200,17 @@ def build_locked_plan(latest, signal, confidence, expected_return, horizon_days,
 
         action = "BUY ON DIP"
 
-
-
     elif "Sell" in signal or "Avoid" in signal:
 
-        buy_low = None
+        buy_low = np.nan
 
-        buy_high = None
+        buy_high = np.nan
 
         target = min(support, close - 1.4 * atr)
 
         stop_loss = close + 1.0 * atr
 
         action = "AVOID / SELL SETUP"
-
-
 
     else:
 
@@ -1169,80 +1223,6 @@ def build_locked_plan(latest, signal, confidence, expected_return, horizon_days,
         stop_loss = close - 1.0 * atr
 
         action = "WAIT / HOLD SETUP"
-
-
-
-    expected_return_pct = expected_return * 100
-
-
-
-    if buy_high is not None:
-
-        trade_return_pct = ((target - buy_high) / buy_high) * 100
-
-        downside_risk_pct = ((buy_high - stop_loss) / buy_high) * 100
-
-    else:
-
-        trade_return_pct = expected_return_pct
-
-        downside_risk_pct = None
-
-
-
-    if expected_return_pct < 0:
-
-        final_decision = "WAIT / DO NOT BUY"
-
-        reason = "Estimated return is negative."
-
-    elif expected_return_pct < 1:
-
-        final_decision = "WAIT"
-
-        reason = "Expected return is too small."
-
-    elif risk == "High":
-
-        final_decision = "AVOID"
-
-        reason = "Risk is high."
-
-    elif "Avoid" in signal or "Sell" in signal:
-
-        final_decision = "AVOID"
-
-        reason = "Main signal is avoid/sell."
-
-    elif confidence < 70:
-
-        final_decision = "WAIT"
-
-        reason = "Confidence is not strong enough."
-
-    elif trade_return_pct < 2:
-
-        final_decision = "WATCH ONLY"
-
-        reason = "Trade return from buy zone to target is too small."
-
-    elif downside_risk_pct is not None and downside_risk_pct > 5:
-
-        final_decision = "WAIT"
-
-        reason = "Downside risk is too high."
-
-    elif signal in ["Strong Buy", "Buy Signal", "Buy on Dip"]:
-
-        final_decision = "BUY ON DIP"
-
-        reason = "Plan is valid, but entry should only happen inside the buy zone."
-
-    else:
-
-        final_decision = "WAIT"
-
-        reason = "Setup is not strong enough."
 
 
 
@@ -1264,161 +1244,25 @@ def build_locked_plan(latest, signal, confidence, expected_return, horizon_days,
 
 
 
-    return {
+    return pd.DataFrame({
 
-        "Generated At": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "Action": [action],
 
-        "Entry Price At Plan": round(close, 2),
+        "Buy Zone Low": [round(buy_low, 2) if not pd.isna(buy_low) else None],
 
-        "Action": action,
+        "Buy Zone High": [round(buy_high, 2) if not pd.isna(buy_high) else None],
 
-        "Signal": signal,
+        "Target": [round(target, 2)],
 
-        "Final Decision": final_decision,
+        "Stop Loss": [round(stop_loss, 2)],
 
-        "Decision Reason": reason,
+        "Expected Hold": [hold],
 
-        "Buy Zone Low": round(buy_low, 2) if buy_low is not None else None,
+        "Confidence": [f"{confidence}%"],
 
-        "Buy Zone High": round(buy_high, 2) if buy_high is not None else None,
+        "Estimated Return": [f"{expected_return:.2%}"]
 
-        "Target": round(target, 2),
-
-        "Stop Loss": round(stop_loss, 2),
-
-        "Expected Hold": hold,
-
-        "Confidence": confidence,
-
-        "Estimated Return %": round(expected_return_pct, 2),
-
-        "Trade Return From Buy Zone %": round(trade_return_pct, 2),
-
-        "Downside Risk %": round(downside_risk_pct, 2) if downside_risk_pct is not None else None,
-
-        "Risk": risk
-
-    }
-
-
-
-
-
-def live_plan_status(live_price, plan):
-
-    final_decision = plan.get("Final Decision")
-
-    buy_low = plan.get("Buy Zone Low")
-
-    buy_high = plan.get("Buy Zone High")
-
-    target = plan.get("Target")
-
-    stop_loss = plan.get("Stop Loss")
-
-
-
-    if final_decision in ["AVOID", "WAIT / DO NOT BUY"]:
-
-        return final_decision, plan.get("Decision Reason")
-
-
-
-    if buy_low is None or buy_high is None:
-
-        return "NO ENTRY ZONE", "This plan does not have a valid buy zone."
-
-
-
-    if live_price >= target:
-
-        return "TARGET HIT", "Price reached or passed the target."
-
-
-
-    if live_price <= stop_loss:
-
-        return "STOP LOSS HIT", "Price reached or passed the stop loss."
-
-
-
-    if buy_low <= live_price <= buy_high:
-
-        return "ENTRY ZONE HIT", "Price is inside the locked buy zone."
-
-
-
-    if live_price > buy_high:
-
-        return "WAIT / DO NOT CHASE", "Price is above the locked buy zone. Do not chase."
-
-
-
-    if live_price < buy_low:
-
-        return "WAIT / BELOW ZONE", "Price is below the buy zone. Wait for confirmation."
-
-
-
-    return "WAIT", "No action right now."
-
-
-
-
-
-def make_price_chart(df, ticker, title_suffix="", plan=None):
-
-    fig = go.Figure()
-
-
-
-    fig.add_trace(go.Scatter(x=df["Date"], y=df["Close"], mode="lines", name="Close"))
-
-    fig.add_trace(go.Scatter(x=df["Date"], y=df["MA9"], mode="lines", name="MA9"))
-
-    fig.add_trace(go.Scatter(x=df["Date"], y=df["MA20"], mode="lines", name="MA20"))
-
-    fig.add_trace(go.Scatter(x=df["Date"], y=df["MA50"], mode="lines", name="MA50"))
-
-    fig.add_trace(go.Scatter(x=df["Date"], y=df["VWAP"], mode="lines", name="VWAP"))
-
-
-
-    if plan is not None:
-
-        if plan.get("Buy Zone Low") is not None:
-
-            fig.add_hline(y=plan["Buy Zone Low"], line_dash="dot", annotation_text="Buy Zone Low")
-
-        if plan.get("Buy Zone High") is not None:
-
-            fig.add_hline(y=plan["Buy Zone High"], line_dash="dot", annotation_text="Buy Zone High")
-
-        if plan.get("Target") is not None:
-
-            fig.add_hline(y=plan["Target"], line_dash="dash", annotation_text="Target")
-
-        if plan.get("Stop Loss") is not None:
-
-            fig.add_hline(y=plan["Stop Loss"], line_dash="dash", annotation_text="Stop Loss")
-
-
-
-    fig.update_layout(
-
-        title=f"{ticker} Price Chart {title_suffix}",
-
-        xaxis_title="Date",
-
-        yaxis_title="Price",
-
-        height=500
-
-    )
-
-
-
-    return fig
+    })
 
 
 
@@ -1478,24 +1322,6 @@ def scanner_score(ticker, period, interval, market_score, market_label):
 
 
 
-    temp_plan = build_locked_plan(
-
-        latest,
-
-        scores["signal"],
-
-        confidence,
-
-        expected_return,
-
-        5,
-
-        scores["risk"]
-
-    )
-
-
-
     return {
 
         "Ticker": ticker,
@@ -1503,10 +1329,6 @@ def scanner_score(ticker, period, interval, market_score, market_label):
         "Price": round(safe_num(latest["Close"]), 2),
 
         "Signal": scores["signal"],
-
-        "Final Decision": temp_plan["Final Decision"],
-
-        "Decision Reason": temp_plan["Decision Reason"],
 
         "Confidence": confidence,
 
@@ -1540,7 +1362,7 @@ mode = st.sidebar.selectbox(
 
     ["Intraday / Short-term", "Swing / Multi-day", "Historical / Long-term"],
 
-    index=0
+    index=1
 
 )
 
@@ -1572,7 +1394,7 @@ long_term_days = st.sidebar.selectbox("Long-term horizon", [30, 60, 90, 120, 180
 
 
 
-scan_count = st.sidebar.selectbox("How many stocks to scan?", [25, 50, 100, 200, 300, 500], index=1)
+scan_count = st.sidebar.selectbox("How many stocks to scan?", [10, 25, 50, 100, 200], index=1)
 
 scan_count = min(scan_count, len(tickers))
 
@@ -1582,11 +1404,31 @@ st.sidebar.write(f"Available tickers loaded: {len(tickers)}")
 
 st.sidebar.write(f"Market: {market_label}")
 
-st.sidebar.write(f"Last refresh: {datetime.now().strftime('%H:%M:%S')}")
+
+
+default_ticker = "AAPL"
 
 
 
-selected_ticker = st.sidebar.selectbox("Select one stock", tickers)
+if default_ticker in tickers:
+
+    default_index = tickers.index(default_ticker)
+
+else:
+
+    default_index = 0
+
+
+
+selected_ticker = st.sidebar.selectbox(
+
+    "Select one stock",
+
+    tickers,
+
+    index=default_index
+
+)
 
 
 
@@ -1604,7 +1446,7 @@ with tab1:
 
     if df.empty:
 
-        st.error("Could not load data.")
+        st.error("Could not load data. Try another ticker like AAPL, MSFT, NVDA, SPY, or QQQ.")
 
     else:
 
@@ -1614,7 +1456,7 @@ with tab1:
 
         if df.empty:
 
-            st.error("Not enough data.")
+            st.error("Not enough data for indicators. Try Swing / Multi-day mode.")
 
         else:
 
@@ -1632,8 +1474,6 @@ with tab1:
 
             latest = df.iloc[-1]
 
-            live_price = safe_num(latest["Close"])
-
 
 
             short_scores = score_stock(latest, fundamentals, short_expected_return, news_score, market_score, market_label)
@@ -1648,9 +1488,9 @@ with tab1:
 
 
 
-            plan_key_short = f"locked_short_plan_{selected_ticker}_{mode}_{short_term_days}"
+            short_plan = trade_plan(latest, short_scores["signal"], short_confidence, short_expected_return, short_term_days)
 
-            plan_key_long = f"locked_long_plan_{selected_ticker}_{mode}_{long_term_days}"
+            long_plan = trade_plan(latest, long_scores["signal"], long_confidence, long_expected_return, long_term_days)
 
 
 
@@ -1658,165 +1498,57 @@ with tab1:
 
 
 
-            col_a, col_b, col_c = st.columns(3)
-
-
-
-            with col_a:
-
-                generate_short = st.button("Generate / Replace Short-Term Locked Plan")
-
-            with col_b:
-
-                generate_long = st.button("Generate / Replace Long-Term Locked Plan")
-
-            with col_c:
-
-                reset_plans = st.button("Reset Locked Plans")
-
-
-
-            if reset_plans:
-
-                if plan_key_short in st.session_state:
-
-                    del st.session_state[plan_key_short]
-
-                if plan_key_long in st.session_state:
-
-                    del st.session_state[plan_key_long]
-
-                st.success("Locked plans reset.")
-
-
-
-            if generate_short or plan_key_short not in st.session_state:
-
-                st.session_state[plan_key_short] = build_locked_plan(
-
-                    latest,
-
-                    short_scores["signal"],
-
-                    short_confidence,
-
-                    short_expected_return,
-
-                    short_term_days,
-
-                    short_scores["risk"]
-
-                )
-
-
-
-            if generate_long or plan_key_long not in st.session_state:
-
-                st.session_state[plan_key_long] = build_locked_plan(
-
-                    latest,
-
-                    long_scores["signal"],
-
-                    long_confidence,
-
-                    long_expected_return,
-
-                    long_term_days,
-
-                    long_scores["risk"]
-
-                )
-
-
-
-            short_plan = st.session_state[plan_key_short]
-
-            long_plan = st.session_state[plan_key_long]
-
-
-
-            short_live_status, short_live_reason = live_plan_status(live_price, short_plan)
-
-            long_live_status, long_live_reason = live_plan_status(live_price, long_plan)
-
-
-
             c1, c2, c3, c4, c5 = st.columns(5)
 
 
 
-            c1.metric("Live / Latest Price", f"${live_price:.2f}")
+            c1.metric("Current Price", f"${latest['Close']:.2f}")
 
-            c2.metric("Short Signal", short_plan["Signal"])
+            c2.metric("Risk", short_scores["risk"])
 
-            c3.metric("Short Locked Decision", short_plan["Final Decision"])
+            c3.metric(f"Short Signal ({short_term_days}d)", short_scores["signal"])
 
-            c4.metric("Live Status", short_live_status)
+            c4.metric(f"Long Signal ({long_term_days}d)", long_scores["signal"])
 
             c5.metric("Market", market_label)
 
 
 
-            st.markdown("### Short-Term Locked Plan")
+            st.markdown("### Short-Term Trading Plan")
 
-            short_plan_display = pd.DataFrame([short_plan])
-
-            short_plan_display["Live Price"] = round(live_price, 2)
-
-            short_plan_display["Live Status"] = short_live_status
-
-            short_plan_display["Live Status Reason"] = short_live_reason
-
-            st.dataframe(short_plan_display, use_container_width=True)
+            st.dataframe(short_plan, use_container_width=True)
 
 
 
-            if short_live_status == "ENTRY ZONE HIT":
+            st.markdown("### Long-Term Trading Plan")
 
-                st.success(short_live_reason)
-
-            elif short_live_status in ["WAIT / DO NOT CHASE", "WAIT", "WAIT / BELOW ZONE"]:
-
-                st.warning(short_live_reason)
-
-            elif short_live_status in ["TARGET HIT"]:
-
-                st.success(short_live_reason)
-
-            elif short_live_status in ["STOP LOSS HIT", "AVOID", "WAIT / DO NOT BUY"]:
-
-                st.error(short_live_reason)
-
-
-
-            st.markdown("### Long-Term Locked Plan")
-
-            long_plan_display = pd.DataFrame([long_plan])
-
-            long_plan_display["Live Price"] = round(live_price, 2)
-
-            long_plan_display["Live Status"] = long_live_status
-
-            long_plan_display["Live Status Reason"] = long_live_reason
-
-            st.dataframe(long_plan_display, use_container_width=True)
+            st.dataframe(long_plan, use_container_width=True)
 
 
 
             st.info(
 
-                f"Important: Live price updates every 60 seconds, but locked Buy Zone / Target / Stop Loss "
+                f"Short-term: {short_scores['signal']} | Confidence: {short_confidence}% | "
 
-                f"do not change unless you click Generate / Replace Plan."
+                f"Estimated Return: {short_expected_return:.2%} | News: {news_label}"
 
             )
 
 
 
-            st.markdown("### Price Chart with Locked Plan Lines")
+            st.info(
 
-            st.plotly_chart(make_price_chart(df, selected_ticker, f"({mode})", short_plan), use_container_width=True)
+                f"Long-term: {long_scores['signal']} | Confidence: {long_confidence}% | "
+
+                f"Estimated Return: {long_expected_return:.2%} | Market: {market_label}"
+
+            )
+
+
+
+            st.markdown("### Price Chart")
+
+            st.plotly_chart(make_price_chart(df, selected_ticker, f"({mode})"), use_container_width=True)
 
 
 
@@ -1834,7 +1566,7 @@ with tab1:
 
                     st.markdown("### 5-Year Historical Chart")
 
-                    st.plotly_chart(make_price_chart(hist_df, selected_ticker, "(5-Year Historical)", long_plan), use_container_width=True)
+                    st.plotly_chart(make_price_chart(hist_df, selected_ticker, "(5-Year Historical)"), use_container_width=True)
 
 
 
@@ -1888,6 +1620,8 @@ with tab1:
 
             })
 
+
+
             st.dataframe(score_df, use_container_width=True)
 
 
@@ -1910,19 +1644,25 @@ with tab1:
 
             st.markdown("### Fundamentals")
 
-            st.dataframe(
+            if fundamentals:
 
-                pd.DataFrame({
+                st.dataframe(
 
-                    "Metric": list(fundamentals.keys()),
+                    pd.DataFrame({
 
-                    "Value": list(fundamentals.values())
+                        "Metric": list(fundamentals.keys()),
 
-                }),
+                        "Value": list(fundamentals.values())
 
-                use_container_width=True
+                    }),
 
-            )
+                    use_container_width=True
+
+                )
+
+            else:
+
+                st.warning("No fundamentals loaded.")
 
 
 
@@ -1930,7 +1670,7 @@ with tab1:
 
             if news_df.empty:
 
-                st.warning("No news loaded. Add FINNHUB_API_KEY in Streamlit secrets.")
+                st.warning("No news loaded. Add FINNHUB_API_KEY in Streamlit secrets if you want news.")
 
             else:
 
@@ -1978,21 +1718,27 @@ with tab2:
 
         order = {
 
-            "BUY ON DIP": 1,
+            "Strong Buy": 1,
 
-            "WATCH ONLY": 2,
+            "Buy Signal": 2,
 
-            "WAIT": 3,
+            "Buy on Dip": 3,
 
-            "WAIT / DO NOT BUY": 4,
+            "Hold / Wait": 4,
 
-            "AVOID": 5
+            "Wait for Market Confirmation": 5,
+
+            "Avoid / Negative News": 6,
+
+            "Avoid / High Risk": 7,
+
+            "Sell / High Caution": 8
 
         }
 
 
 
-        scanner_df["Sort"] = scanner_df["Final Decision"].map(order).fillna(9)
+        scanner_df["Sort"] = scanner_df["Signal"].map(order).fillna(9)
 
 
 
@@ -2016,7 +1762,7 @@ with tab2:
 
             scanner_df.to_csv(index=False).encode("utf-8"),
 
-            "improved_stock_scanner_results.csv",
+            "stock_scanner_results.csv",
 
             "text/csv"
 

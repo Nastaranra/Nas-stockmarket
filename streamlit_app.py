@@ -76,79 +76,7 @@ def load_price_data(ticker, period, interval):
 
 
 
-    try:
-
-        df = yf.download(
-
-            ticker,
-
-            period=period,
-
-            interval=interval,
-
-            auto_adjust=True,
-
-            progress=False,
-
-            threads=False
-
-        )
-
-
-
-        if df is None or df.empty:
-
-            df = yf.download(
-
-                ticker,
-
-                period="1y",
-
-                interval="1d",
-
-                auto_adjust=True,
-
-                progress=False,
-
-                threads=False
-
-            )
-
-
-
-        if df is not None and not df.empty:
-
-            df = df.reset_index()
-
-
-
-            if isinstance(df.columns, pd.MultiIndex):
-
-                df.columns = df.columns.get_level_values(0)
-
-
-
-            if "Datetime" in df.columns:
-
-                df = df.rename(columns={"Datetime": "Date"})
-
-
-
-            if "Date" in df.columns and "Close" in df.columns:
-
-                df = df.dropna(subset=["Close"])
-
-                if not df.empty:
-
-                    return df
-
-
-
-    except Exception:
-
-        pass
-
-
+    # Use Stooq first because it is more stable on Streamlit Cloud
 
     try:
 
@@ -194,7 +122,65 @@ def load_price_data(ticker, period, interval):
 
             df = df.dropna(subset=["Close"])
 
-            return df
+            if not df.empty:
+
+                return df
+
+
+
+    except Exception:
+
+        pass
+
+
+
+    # Backup: Yahoo Finance
+
+    try:
+
+        df = yf.download(
+
+            ticker,
+
+            period=period,
+
+            interval=interval,
+
+            auto_adjust=True,
+
+            progress=False,
+
+            threads=False,
+
+            timeout=10
+
+        )
+
+
+
+        if df is not None and not df.empty:
+
+            df = df.reset_index()
+
+
+
+            if isinstance(df.columns, pd.MultiIndex):
+
+                df.columns = df.columns.get_level_values(0)
+
+
+
+            if "Datetime" in df.columns:
+
+                df = df.rename(columns={"Datetime": "Date"})
+
+
+
+            if "Date" in df.columns and "Close" in df.columns:
+
+                df = df.dropna(subset=["Close"])
+
+                return df
 
 
 
@@ -545,10 +531,6 @@ def add_indicators(df):
         "ATR", "Support", "Resistance"
 
     ]
-
-
-
-    needed_cols = [c for c in needed_cols if c in df.columns]
 
 
 
@@ -1354,7 +1336,11 @@ def scanner_score(ticker, period, interval, market_score, market_label):
 
 tickers, ticker_df = get_all_tickers()
 
-market_score, market_label = get_market_direction()
+
+
+with st.spinner("Loading market direction..."):
+
+    market_score, market_label = get_market_direction()
 
 
 
@@ -1406,21 +1392,11 @@ st.sidebar.write(f"Market: {market_label}")
 
 
 
-selected_ticker = st.sidebar.selectbox(
-
-    "Select one stock",
-
-    tickers,
-
-    index=0
-
-)
+selected_ticker = st.sidebar.selectbox("Select one stock", tickers, index=0)
 
 
 
 tab1, tab2, tab3 = st.tabs(["Single Stock", "Scanner", "Ticker List"])
-
-
 
 
 
@@ -1452,9 +1428,9 @@ with tab1:
 
 
 
-            short_estimate_df, short_expected_return, short_forecast_label = estimate_future_price(df, short_term_days)
+            short_estimate_df, short_expected_return, _ = estimate_future_price(df, short_term_days)
 
-            long_estimate_df, long_expected_return, long_forecast_label = estimate_future_price(df, long_term_days)
+            long_estimate_df, long_expected_return, _ = estimate_future_price(df, long_term_days)
 
 
 
@@ -1486,8 +1462,6 @@ with tab1:
 
             c1, c2, c3, c4, c5 = st.columns(5)
 
-
-
             c1.metric("Current Price", f"${latest['Close']:.2f}")
 
             c2.metric("Risk", short_scores["risk"])
@@ -1512,47 +1486,9 @@ with tab1:
 
 
 
-            st.info(
-
-                f"Short-term: {short_scores['signal']} | Confidence: {short_confidence}% | "
-
-                f"Estimated Return: {short_expected_return:.2%} | News: {news_label}"
-
-            )
-
-
-
-            st.info(
-
-                f"Long-term: {long_scores['signal']} | Confidence: {long_confidence}% | "
-
-                f"Estimated Return: {long_expected_return:.2%} | Market: {market_label}"
-
-            )
-
-
-
             st.markdown("### Price Chart")
 
             st.plotly_chart(make_price_chart(df, selected_ticker, f"({mode})"), use_container_width=True)
-
-
-
-            hist_df = load_price_data(selected_ticker, "5y", "1d")
-
-
-
-            if not hist_df.empty:
-
-                hist_df = add_indicators(hist_df)
-
-
-
-                if not hist_df.empty:
-
-                    st.markdown("### 5-Year Historical Chart")
-
-                    st.plotly_chart(make_price_chart(hist_df, selected_ticker, "(5-Year Historical)"), use_container_width=True)
 
 
 
@@ -1606,8 +1542,6 @@ with tab1:
 
             })
 
-
-
             st.dataframe(score_df, use_container_width=True)
 
 
@@ -1620,35 +1554,21 @@ with tab1:
 
 
 
-            st.markdown("### Why Long-Term Signal?")
-
-            for r in long_scores["reasons"]:
-
-                st.write(f"- {r}")
-
-
-
             st.markdown("### Fundamentals")
 
-            if fundamentals:
+            st.dataframe(
 
-                st.dataframe(
+                pd.DataFrame({
 
-                    pd.DataFrame({
+                    "Metric": list(fundamentals.keys()),
 
-                        "Metric": list(fundamentals.keys()),
+                    "Value": list(fundamentals.values())
 
-                        "Value": list(fundamentals.values())
+                }),
 
-                    }),
+                use_container_width=True
 
-                    use_container_width=True
-
-                )
-
-            else:
-
-                st.warning("No fundamentals loaded.")
+            )
 
 
 
@@ -1664,15 +1584,9 @@ with tab1:
 
 
 
-
-
 with tab2:
 
     st.subheader("Scanner")
-
-    st.write(f"Scanning first {scan_count} stocks. Market condition: {market_label}")
-
-
 
     rows = []
 
@@ -1684,13 +1598,9 @@ with tab2:
 
         result = scanner_score(ticker, period, interval, market_score, market_label)
 
-
-
         if result is not None:
 
             rows.append(result)
-
-
 
         progress.progress((i + 1) / scan_count)
 
@@ -1726,8 +1636,6 @@ with tab2:
 
         scanner_df["Sort"] = scanner_df["Signal"].map(order).fillna(9)
 
-
-
         scanner_df = scanner_df.sort_values(
 
             ["Sort", "Confidence", "Total Score"],
@@ -1757,8 +1665,6 @@ with tab2:
     else:
 
         st.warning("No scanner results found.")
-
-
 
 
 

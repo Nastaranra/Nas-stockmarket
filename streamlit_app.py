@@ -22,13 +22,9 @@ st.set_page_config(page_title="AI Trading Signal App", layout="wide")
 
 st.title("📈 AI Trading Signal App")
 
-st.caption("Live Finnhub Price + Technical + News + Trading Plan")
+st.caption("Technical + Fundamental + News + Market Direction + Trading Plan")
 
 st.warning("Educational only. Not financial advice. No signal is guaranteed.")
-
-
-
-TICKERS = ["AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "GOOG", "META", "TSLA", "SPY", "QQQ"]
 
 
 
@@ -37,6 +33,16 @@ if st.button("Clear cache / Refresh data"):
     st.cache_data.clear()
 
     st.rerun()
+
+
+
+FALLBACK = [
+
+    "AAPL", "MSFT", "NVDA", "AMZN", "GOOGL",
+
+    "GOOG", "META", "TSLA", "SPY", "QQQ"
+
+]
 
 
 
@@ -60,67 +66,267 @@ def safe_num(x, default=0):
 
 
 
-@st.cache_data(ttl=30)
+def make_sample_data(ticker):
 
-def get_live_quote(ticker):
-
-    api_key = st.secrets.get("FINNHUB_API_KEY", "")
+    np.random.seed(abs(hash(ticker)) % 10000)
 
 
 
-    if not api_key:
+    dates = pd.date_range(
 
-        return None, "No Finnhub API Key"
+        end=pd.Timestamp.today(),
+
+        periods=252,
+
+        freq="B"
+
+    )
+
+
+
+    base_prices = {
+
+        "AAPL": 190,
+
+        "MSFT": 420,
+
+        "NVDA": 950,
+
+        "AMZN": 180,
+
+        "GOOGL": 170,
+
+        "GOOG": 170,
+
+        "META": 500,
+
+        "TSLA": 180,
+
+        "SPY": 520,
+
+        "QQQ": 450
+
+    }
+
+
+
+    start_price = base_prices.get(ticker, 100)
+
+    returns = np.random.normal(0.0006, 0.018, len(dates))
+
+    close = start_price * np.cumprod(1 + returns)
+
+
+
+    df = pd.DataFrame({
+
+        "Date": dates,
+
+        "Open": close * np.random.uniform(0.995, 1.005, len(dates)),
+
+        "High": close * np.random.uniform(1.005, 1.025, len(dates)),
+
+        "Low": close * np.random.uniform(0.975, 0.995, len(dates)),
+
+        "Close": close,
+
+        "Volume": np.random.randint(
+
+            10_000_000,
+
+            100_000_000,
+
+            len(dates)
+
+        )
+
+    })
+
+
+
+    return df
+
+
+
+
+
+@st.cache_data(ttl=86400)
+
+def get_all_tickers():
+
+    tickers = []
 
 
 
     try:
 
-        url = "https://finnhub.io/api/v1/quote"
+        url1 = "https://www.nasdaqtrader.com/dynamic/SymDir/nasdaqlisted.txt"
 
-        params = {"symbol": ticker, "token": api_key}
-
-        r = requests.get(url, params=params, timeout=8)
+        r1 = requests.get(url1, timeout=6)
 
 
 
-        if r.status_code != 200:
+        if r1.status_code == 200:
 
-            return None, "Finnhub quote error"
+            df1 = pd.read_csv(StringIO(r1.text), sep="|")
 
+            if "Test Issue" in df1.columns and "Symbol" in df1.columns:
 
+                df1 = df1[df1["Test Issue"] == "N"]
 
-        data = r.json()
+                tickers += df1["Symbol"].astype(str).tolist()
 
-        price = data.get("c")
+    except Exception:
 
-
-
-        if price is None or float(price) <= 0:
-
-            return None, "No live quote"
+        pass
 
 
 
-        return float(price), "Live/Finnhub"
+    try:
+
+        url2 = "https://www.nasdaqtrader.com/dynamic/SymDir/otherlisted.txt"
+
+        r2 = requests.get(url2, timeout=6)
+
+
+
+        if r2.status_code == 200:
+
+            df2 = pd.read_csv(StringIO(r2.text), sep="|")
+
+            if "Test Issue" in df2.columns and "ACT Symbol" in df2.columns:
+
+                df2 = df2[df2["Test Issue"] == "N"]
+
+                tickers += df2["ACT Symbol"].astype(str).tolist()
+
+    except Exception:
+
+        pass
+
+
+
+    clean = []
+
+
+
+    for t in tickers:
+
+        t = str(t).strip().upper().replace(".", "-")
+
+
+
+        if (
+
+            len(t) <= 6
+
+            and "$" not in t
+
+            and " " not in t
+
+            and t != "FILE"
+
+            and t.isascii()
+
+        ):
+
+            clean.append(t)
+
+
+
+    clean = sorted(list(set(clean)))
+
+
+
+    if not clean:
+
+        clean = FALLBACK
+
+
+
+    return clean, pd.DataFrame({"Ticker": clean})
+
+
+
+@st.cache_data(ttl=600)
+
+def load_price_data(ticker, period, interval):
+
+    ticker = str(ticker).upper().strip()
+
+
+
+    # 1) Try Stooq first because it is more stable on Streamlit Cloud
+
+    try:
+
+        stooq_symbol = ticker.lower() + ".us"
+
+        url = f"https://stooq.com/q/d/l/?s={stooq_symbol}&i=d"
+
+
+
+        response = requests.get(url, timeout=6)
+
+
+
+        if response.status_code == 200 and response.text.strip():
+
+            df = pd.read_csv(StringIO(response.text))
+
+
+
+            if df is not None and not df.empty and "Close" in df.columns:
+
+                df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
+
+                df = df.dropna(subset=["Date", "Close"])
+
+                df = df.sort_values("Date")
+
+
+
+                if period == "5d":
+
+                    df = df.tail(30)
+
+                elif period == "1mo":
+
+                    df = df.tail(30)
+
+                elif period == "6mo":
+
+                    df = df.tail(126)
+
+                elif period == "1y":
+
+                    df = df.tail(252)
+
+                elif period == "5y":
+
+                    df = df.tail(1260)
+
+                else:
+
+                    df = df.tail(252)
+
+
+
+                if not df.empty:
+
+                    df["Data_Source"] = "Live/Stooq"
+
+                    return df
 
 
 
     except Exception:
 
-        return None, "Finnhub quote failed"
+        pass
 
 
 
-
-
-@st.cache_data(ttl=300)
-
-def load_price_data(ticker, period="1y"):
-
-    ticker = str(ticker).upper().strip()
-
-
+    # 2) Try Yahoo Finance as backup
 
     try:
 
@@ -130,7 +336,7 @@ def load_price_data(ticker, period="1y"):
 
             period=period,
 
-            interval="1d",
+            interval=interval,
 
             auto_adjust=True,
 
@@ -138,7 +344,7 @@ def load_price_data(ticker, period="1y"):
 
             threads=False,
 
-            timeout=10
+            timeout=6
 
         )
 
@@ -156,13 +362,23 @@ def load_price_data(ticker, period="1y"):
 
 
 
+            if "Datetime" in df.columns:
+
+                df = df.rename(columns={"Datetime": "Date"})
+
+
+
             if "Date" in df.columns and "Close" in df.columns:
 
                 df = df.dropna(subset=["Close"])
 
-                df["Data_Source"] = "Historical/YFinance"
 
-                return df
+
+                if not df.empty:
+
+                    df["Data_Source"] = "Live/YFinance"
+
+                    return df
 
 
 
@@ -171,54 +387,84 @@ def load_price_data(ticker, period="1y"):
         pass
 
 
+
+    # 3) Final fallback: sample data, so the app never breaks
+
+    df = make_sample_data(ticker)
+
+    df["Data_Source"] = "Sample Data"
+
+    return df
+
+
+
+
+
+@st.cache_data(ttl=3600)
+
+def load_fundamentals(ticker):
 
     try:
 
-        url = f"https://stooq.com/q/d/l/?s={ticker.lower()}.us&i=d"
-
-        r = requests.get(url, timeout=8)
+        info = yf.Ticker(ticker).info
 
 
 
-        if r.status_code == 200 and r.text.strip():
+        return {
 
-            df = pd.read_csv(StringIO(r.text))
+            "Company": info.get("longName"),
 
+            "Sector": info.get("sector"),
 
+            "Industry": info.get("industry"),
 
-            if not df.empty and "Close" in df.columns:
+            "Market Cap": info.get("marketCap"),
 
-                df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
+            "P/E Ratio": info.get("trailingPE"),
 
-                df = df.dropna(subset=["Date", "Close"])
+            "Forward P/E": info.get("forwardPE"),
 
-                df = df.sort_values("Date")
+            "Profit Margin": info.get("profitMargins"),
 
+            "Revenue Growth": info.get("revenueGrowth"),
 
+            "Debt to Equity": info.get("debtToEquity"),
 
-                if period == "5y":
+            "ROE": info.get("returnOnEquity"),
 
-                    df = df.tail(1260)
+            "Beta": info.get("beta"),
 
-                else:
-
-                    df = df.tail(252)
-
-
-
-                df["Data_Source"] = "Historical/Stooq"
-
-                return df
+        }
 
 
 
     except Exception:
 
-        pass
+        return {
 
+            "Company": ticker,
 
+            "Sector": None,
 
-    return pd.DataFrame()
+            "Industry": None,
+
+            "Market Cap": None,
+
+            "P/E Ratio": None,
+
+            "Forward P/E": None,
+
+            "Profit Margin": None,
+
+            "Revenue Growth": None,
+
+            "Debt to Equity": None,
+
+            "ROE": None,
+
+            "Beta": None,
+
+        }
 
 
 
@@ -228,17 +474,17 @@ def load_price_data(ticker, period="1y"):
 
 def load_news_sentiment(ticker):
 
-    api_key = st.secrets.get("FINNHUB_API_KEY", "")
-
-
-
-    if not api_key:
-
-        return pd.DataFrame(), 0, "No API Key"
-
-
-
     try:
+
+        api_key = st.secrets.get("FINNHUB_API_KEY", "")
+
+
+
+        if api_key == "":
+
+            return pd.DataFrame(), 0, "No API Key"
+
+
 
         today = datetime.today().date()
 
@@ -247,6 +493,8 @@ def load_news_sentiment(ticker):
 
 
         url = "https://finnhub.io/api/v1/company-news"
+
+
 
         params = {
 
@@ -262,17 +510,17 @@ def load_news_sentiment(ticker):
 
 
 
-        r = requests.get(url, params=params, timeout=8)
+        response = requests.get(url, params=params, timeout=6)
 
 
 
-        if r.status_code != 200:
+        if response.status_code != 200:
 
             return pd.DataFrame(), 0, "News Error"
 
 
 
-        news = r.json()
+        news = response.json()
 
 
 
@@ -282,9 +530,27 @@ def load_news_sentiment(ticker):
 
 
 
-        positive_words = ["beat", "growth", "strong", "upgrade", "surge", "profit", "bullish", "gain", "rally", "ai"]
+        positive_words = [
 
-        negative_words = ["miss", "drop", "fall", "lawsuit", "weak", "downgrade", "loss", "bearish", "risk", "warning"]
+            "beat", "growth", "strong", "upgrade", "surge", "record",
+
+            "profit", "higher", "bullish", "positive", "gain", "rally",
+
+            "outperform", "raises", "increase", "ai", "partnership"
+
+        ]
+
+
+
+        negative_words = [
+
+            "miss", "drop", "fall", "lawsuit", "weak", "downgrade",
+
+            "loss", "lower", "bearish", "negative", "decline", "cut",
+
+            "warning", "risk", "investigation", "delay"
+
+        ]
 
 
 
@@ -308,19 +574,33 @@ def load_news_sentiment(ticker):
 
             neg = sum(1 for w in negative_words if w in text)
 
+
+
             score = pos - neg
 
             total_score += score
 
 
 
-            sentiment = "Positive" if score > 0 else "Negative" if score < 0 else "Neutral"
+            if score > 0:
+
+                sentiment = "Positive"
+
+            elif score < 0:
+
+                sentiment = "Negative"
+
+            else:
+
+                sentiment = "Neutral"
 
 
 
             rows.append({
 
-                "Date": datetime.fromtimestamp(item.get("datetime")).strftime("%Y-%m-%d") if item.get("datetime") else None,
+                "Date": datetime.fromtimestamp(item.get("datetime")).strftime("%Y-%m-%d")
+
+                if item.get("datetime") else None,
 
                 "Headline": headline,
 
@@ -362,9 +642,7 @@ def load_news_sentiment(ticker):
 
 
 
-
-
-def add_indicators(df, live_price=None):
+def add_indicators(df):
 
     df = df.copy()
 
@@ -376,27 +654,25 @@ def add_indicators(df, live_price=None):
 
 
 
-    if live_price is not None and len(df) > 0:
-
-        df.loc[df.index[-1], "Close"] = live_price
-
-        if "High" in df.columns:
-
-            df.loc[df.index[-1], "High"] = max(df.loc[df.index[-1], "High"], live_price)
-
-        if "Low" in df.columns:
-
-            df.loc[df.index[-1], "Low"] = min(df.loc[df.index[-1], "Low"], live_price)
-
-
-
     df["Return"] = df["Close"].pct_change()
+
+
 
     df["MA9"] = df["Close"].rolling(9, min_periods=5).mean()
 
     df["MA20"] = df["Close"].rolling(20, min_periods=10).mean()
 
     df["MA50"] = df["Close"].rolling(50, min_periods=20).mean()
+
+    df["MA200"] = df["Close"].rolling(200, min_periods=50).mean()
+
+
+
+    df["Return_5"] = df["Close"].pct_change(5)
+
+    df["Return_20"] = df["Close"].pct_change(20)
+
+    df["Volatility"] = df["Return"].rolling(20, min_periods=10).std() * np.sqrt(252)
 
 
 
@@ -440,6 +716,8 @@ def add_indicators(df, live_price=None):
 
         tr3 = (df["Low"] - df["Close"].shift()).abs()
 
+
+
         df["TR"] = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
 
         df["ATR"] = df["TR"].rolling(14, min_periods=7).mean()
@@ -447,6 +725,36 @@ def add_indicators(df, live_price=None):
     else:
 
         df["ATR"] = df["Close"].rolling(14, min_periods=7).std()
+
+
+
+    if "Volume" in df.columns:
+
+        df["Volume_MA20"] = df["Volume"].rolling(20, min_periods=10).mean()
+
+        df["Volume_Ratio"] = df["Volume"] / df["Volume_MA20"].replace(0, np.nan)
+
+
+
+        if "High" in df.columns and "Low" in df.columns:
+
+            typical_price = (df["High"] + df["Low"] + df["Close"]) / 3
+
+        else:
+
+            typical_price = df["Close"]
+
+
+
+        volume_sum = df["Volume"].replace(0, np.nan).cumsum()
+
+        df["VWAP"] = (typical_price * df["Volume"]).cumsum() / volume_sum
+
+    else:
+
+        df["Volume_Ratio"] = 1
+
+        df["VWAP"] = df["Close"]
 
 
 
@@ -460,119 +768,105 @@ def add_indicators(df, live_price=None):
 
 
 
-    needed = ["Close", "MA9", "MA20", "MA50", "RSI", "MACD", "MACD_Signal", "ATR", "Support", "Resistance"]
+    needed_cols = [
 
-    return df.dropna(subset=needed)
+        "Close", "MA9", "MA20", "MA50",
 
+        "RSI", "MACD", "MACD_Signal",
 
+        "ATR", "Support", "Resistance"
 
+    ]
 
 
-def make_signal(latest, news_score=0):
 
-    score = 0
+    return df.dropna(subset=needed_cols)
 
-    reasons = []
 
 
 
-    if latest["Close"] > latest["MA9"]:
 
-        score += 1
+@st.cache_data(ttl=900)
 
-        reasons.append("Price is above MA9.")
+def get_market_direction():
 
+    try:
 
+        spy = load_price_data("SPY", "1y", "1d")
 
-    if latest["Close"] > latest["MA20"]:
+        qqq = load_price_data("QQQ", "1y", "1d")
 
-        score += 1
 
-        reasons.append("Price is above MA20.")
 
+        if spy.empty or qqq.empty:
 
+            return 0, "Unknown Market"
 
-    if latest["MA9"] > latest["MA20"]:
 
-        score += 1
 
-        reasons.append("Short-term trend is positive.")
+        spy = add_indicators(spy)
 
+        qqq = add_indicators(qqq)
 
 
-    if latest["MA20"] > latest["MA50"]:
 
-        score += 1
+        if spy.empty or qqq.empty:
 
-        reasons.append("Medium-term trend is positive.")
+            return 0, "Unknown Market"
 
 
 
-    if latest["MACD"] > latest["MACD_Signal"]:
+        spy_latest = spy.iloc[-1]
 
-        score += 1
+        qqq_latest = qqq.iloc[-1]
 
-        reasons.append("MACD is bullish.")
 
 
+        score = 0
 
-    if 45 <= latest["RSI"] <= 68:
 
-        score += 1
 
-        reasons.append("RSI is healthy.")
+        if safe_num(spy_latest["Close"]) > safe_num(spy_latest["MA20"]):
 
-    elif latest["RSI"] > 72:
+            score += 1
 
-        score -= 1
 
-        reasons.append("RSI is overbought.")
 
-    elif latest["RSI"] < 32:
+        if safe_num(spy_latest["MA20"]) > safe_num(spy_latest["MA50"]):
 
-        score -= 1
+            score += 1
 
-        reasons.append("RSI is weak or oversold.")
 
 
+        if safe_num(qqq_latest["Close"]) > safe_num(qqq_latest["MA20"]):
 
-    if news_score > 0.25:
+            score += 1
 
-        score += 1
 
-        reasons.append("Recent news is positive.")
 
-    elif news_score < -0.25:
+        if safe_num(qqq_latest["MA20"]) > safe_num(qqq_latest["MA50"]):
 
-        score -= 1
+            score += 1
 
-        reasons.append("Recent news is negative.")
 
 
+        if score >= 3:
 
-    if score >= 6:
+            return score, "Bullish Market"
 
-        signal = "Strong Buy"
+        elif score <= 1:
 
-    elif score >= 4:
+            return score, "Bearish Market"
 
-        signal = "Buy Signal"
+        else:
 
-    elif score >= 3:
+            return score, "Sideways Market"
 
-        signal = "Hold / Wait"
 
-    else:
 
-        signal = "Sell / High Caution"
+    except Exception:
 
-
-
-    confidence = int(min(85, max(35, 45 + score * 7)))
-
-
-
-    return signal, score, confidence, reasons
+        return 0, "Unknown Market"
 
 
 
@@ -586,7 +880,7 @@ def estimate_future_price(df, days):
 
     if len(recent) < 30:
 
-        return pd.DataFrame(), 0
+        return pd.DataFrame(), 0, "Not enough data"
 
 
 
@@ -596,13 +890,15 @@ def estimate_future_price(df, days):
 
     if returns.empty:
 
-        return pd.DataFrame(), 0
+        return pd.DataFrame(), 0, "Not enough data"
 
 
 
     avg_return = returns.mean()
 
     volatility = returns.std()
+
+
 
     last_price = recent["Close"].iloc[-1]
 
@@ -630,7 +926,29 @@ def estimate_future_price(df, days):
 
 
 
-    return pd.DataFrame({
+    if expected_return >= 0.08:
+
+        label = "Strong Positive Estimate"
+
+    elif expected_return >= 0.03:
+
+        label = "Positive Estimate"
+
+    elif expected_return <= -0.08:
+
+        label = "Strong Negative Estimate"
+
+    elif expected_return <= -0.03:
+
+        label = "Negative Estimate"
+
+    else:
+
+        label = "Neutral Estimate"
+
+
+
+    out = pd.DataFrame({
 
         "Forecast Horizon": [f"{days} days"],
 
@@ -642,9 +960,469 @@ def estimate_future_price(df, days):
 
         "Bear Case Price": [round(bear_price, 2)],
 
-        "Estimated Return": [f"{expected_return:.2%}"]
+        "Estimated Return": [f"{expected_return:.2%}"],
 
-    }), expected_return
+        "Forecast Label": [label]
+
+    })
+
+
+
+    return out, expected_return, label
+
+
+
+def make_price_chart(df, ticker, title_suffix=""):
+
+    fig = go.Figure()
+
+
+
+    fig.add_trace(go.Scatter(x=df["Date"], y=df["Close"], mode="lines", name="Close"))
+
+    fig.add_trace(go.Scatter(x=df["Date"], y=df["MA9"], mode="lines", name="MA9"))
+
+    fig.add_trace(go.Scatter(x=df["Date"], y=df["MA20"], mode="lines", name="MA20"))
+
+    fig.add_trace(go.Scatter(x=df["Date"], y=df["MA50"], mode="lines", name="MA50"))
+
+    fig.add_trace(go.Scatter(x=df["Date"], y=df["VWAP"], mode="lines", name="VWAP"))
+
+
+
+    fig.update_layout(
+
+        title=f"{ticker} Price Chart {title_suffix}",
+
+        xaxis_title="Date",
+
+        yaxis_title="Price",
+
+        height=500
+
+    )
+
+
+
+    return fig
+
+
+
+
+
+def technical_score_only(latest):
+
+    score = 0
+
+    reasons = []
+
+
+
+    close = safe_num(latest["Close"])
+
+    ma9 = safe_num(latest["MA9"])
+
+    ma20 = safe_num(latest["MA20"])
+
+    ma50 = safe_num(latest["MA50"])
+
+    rsi = safe_num(latest["RSI"])
+
+    macd = safe_num(latest["MACD"])
+
+    macd_signal = safe_num(latest["MACD_Signal"])
+
+    vwap = safe_num(latest["VWAP"])
+
+    volume_ratio = safe_num(latest["Volume_Ratio"], 1)
+
+    vol = safe_num(latest["Volatility"], 1)
+
+
+
+    if close > ma9:
+
+        score += 1
+
+        reasons.append("Price is above MA9.")
+
+
+
+    if close > ma20:
+
+        score += 1
+
+        reasons.append("Price is above MA20.")
+
+
+
+    if ma9 > ma20:
+
+        score += 1
+
+        reasons.append("Short-term trend is positive.")
+
+
+
+    if ma20 > ma50:
+
+        score += 1
+
+        reasons.append("Medium-term trend is positive.")
+
+
+
+    if close > vwap:
+
+        score += 1
+
+        reasons.append("Price is above VWAP.")
+
+
+
+    if macd > macd_signal:
+
+        score += 1
+
+        reasons.append("MACD is bullish.")
+
+
+
+    if 45 <= rsi <= 68:
+
+        score += 1
+
+        reasons.append("RSI is in a healthy range.")
+
+    elif rsi > 72:
+
+        score -= 1
+
+        reasons.append("RSI is overbought.")
+
+    elif rsi < 32:
+
+        score -= 1
+
+        reasons.append("RSI is weak or oversold.")
+
+
+
+    if volume_ratio > 1.4:
+
+        score += 1
+
+        reasons.append("Volume is above average.")
+
+
+
+    if vol > 0.65:
+
+        risk = "High"
+
+        score -= 2
+
+        reasons.append("Volatility is high.")
+
+    elif vol > 0.35:
+
+        risk = "Medium"
+
+        reasons.append("Volatility is moderate.")
+
+    else:
+
+        risk = "Low"
+
+        reasons.append("Volatility is low.")
+
+
+
+    return score, risk, reasons
+
+
+
+
+
+def fundamental_score_only(fundamentals):
+
+    score = 0
+
+    reasons = []
+
+
+
+    pe = safe_num(fundamentals.get("P/E Ratio"), None)
+
+    fpe = safe_num(fundamentals.get("Forward P/E"), None)
+
+    margin = safe_num(fundamentals.get("Profit Margin"), None)
+
+    growth = safe_num(fundamentals.get("Revenue Growth"), None)
+
+    debt = safe_num(fundamentals.get("Debt to Equity"), None)
+
+    roe = safe_num(fundamentals.get("ROE"), None)
+
+
+
+    if pe is not None and 0 < pe < 45:
+
+        score += 1
+
+        reasons.append("P/E ratio is acceptable.")
+
+
+
+    if fpe is not None and 0 < fpe < 45:
+
+        score += 1
+
+        reasons.append("Forward P/E is acceptable.")
+
+
+
+    if margin is not None and margin > 0.10:
+
+        score += 1
+
+        reasons.append("Profit margin is strong.")
+
+
+
+    if growth is not None and growth > 0.05:
+
+        score += 1
+
+        reasons.append("Revenue growth is positive.")
+
+
+
+    if debt is not None and debt < 220:
+
+        score += 1
+
+        reasons.append("Debt-to-equity is manageable.")
+
+
+
+    if roe is not None and roe > 0.10:
+
+        score += 1
+
+        reasons.append("ROE is strong.")
+
+
+
+    return score, reasons
+
+
+
+
+
+def signal_type(total_score, risk, market_label, news_score, expected_return):
+
+    if risk == "High":
+
+        return "Avoid / High Risk"
+
+
+
+    if news_score < -0.25:
+
+        return "Avoid / Negative News"
+
+
+
+    if market_label == "Bearish Market" and total_score < 13:
+
+        return "Wait for Market Confirmation"
+
+
+
+    if total_score >= 14 and expected_return > 0:
+
+        return "Strong Buy"
+
+    elif total_score >= 11 and expected_return > 0:
+
+        return "Buy Signal"
+
+    elif total_score >= 9:
+
+        return "Buy on Dip"
+
+    elif total_score >= 6:
+
+        return "Hold / Wait"
+
+    else:
+
+        return "Sell / High Caution"
+
+
+
+
+
+def score_stock(latest, fundamentals, expected_return, news_score, market_score, market_label):
+
+    tech_score, risk, tech_reasons = technical_score_only(latest)
+
+    fund_score, fund_reasons = fundamental_score_only(fundamentals)
+
+
+
+    forecast_score = 0
+
+    forecast_reasons = []
+
+
+
+    if expected_return >= 0.05:
+
+        forecast_score += 2
+
+        forecast_reasons.append("Estimated future return is positive.")
+
+    elif expected_return <= -0.05:
+
+        forecast_score -= 2
+
+        forecast_reasons.append("Estimated future return is negative.")
+
+    else:
+
+        forecast_reasons.append("Estimated future return is neutral.")
+
+
+
+    news_component = 0
+
+    news_reasons = []
+
+
+
+    if news_score > 0.25:
+
+        news_component += 2
+
+        news_reasons.append("Recent news sentiment is positive.")
+
+    elif news_score < -0.25:
+
+        news_component -= 2
+
+        news_reasons.append("Recent news sentiment is negative.")
+
+    else:
+
+        news_reasons.append("Recent news sentiment is neutral or unavailable.")
+
+
+
+    market_component = 0
+
+    market_reasons = []
+
+
+
+    if market_label == "Bullish Market":
+
+        market_component += 2
+
+        market_reasons.append("Overall market trend is bullish.")
+
+    elif market_label == "Bearish Market":
+
+        market_component -= 2
+
+        market_reasons.append("Overall market trend is bearish.")
+
+    elif market_label == "Sideways Market":
+
+        market_reasons.append("Overall market trend is sideways.")
+
+    else:
+
+        market_reasons.append("Market direction is unavailable.")
+
+
+
+    total_score = tech_score + fund_score + forecast_score + news_component + market_component
+
+    signal = signal_type(total_score, risk, market_label, news_score, expected_return)
+
+
+
+    return {
+
+        "technical_score": tech_score,
+
+        "fundamental_score": fund_score,
+
+        "forecast_score": forecast_score,
+
+        "news_score_component": news_component,
+
+        "market_score_component": market_component,
+
+        "total_score": total_score,
+
+        "risk": risk,
+
+        "signal": signal,
+
+        "reasons": tech_reasons + fund_reasons + forecast_reasons + news_reasons + market_reasons
+
+    }
+
+
+
+def confidence_score(scores, expected_return, news_score):
+
+    base = 45
+
+
+
+    base += scores["technical_score"] * 2.2
+
+    base += scores["fundamental_score"] * 1.5
+
+    base += scores["forecast_score"] * 2.5
+
+    base += scores["news_score_component"] * 2
+
+    base += scores["market_score_component"] * 2
+
+
+
+    if expected_return > 0.05:
+
+        base += 3
+
+    elif expected_return < -0.05:
+
+        base -= 4
+
+
+
+    if scores["risk"] == "High":
+
+        base -= 18
+
+    elif scores["risk"] == "Low":
+
+        base += 4
+
+
+
+    if news_score < -0.25:
+
+        base -= 8
+
+
+
+    return int(max(35, min(85, base)))
 
 
 
@@ -664,19 +1442,47 @@ def trade_plan(latest, signal, confidence, expected_return, horizon_days):
 
     if signal in ["Strong Buy", "Buy Signal"]:
 
-        action = "BUY SETUP"
-
         buy_low = max(support, close - 0.7 * atr)
 
         buy_high = min(close + 0.25 * atr, close * 1.015)
 
         target = max(resistance, close + 1.7 * atr)
 
-        stop_loss = buy_low - atr
+        stop_loss = buy_low - 1.05 * atr
 
-    elif signal == "Hold / Wait":
+        action = "BUY SETUP"
 
-        action = "WAIT / HOLD SETUP"
+
+
+    elif signal == "Buy on Dip":
+
+        buy_low = max(support, close - 1.2 * atr)
+
+        buy_high = close - 0.3 * atr
+
+        target = close + 1.5 * atr
+
+        stop_loss = buy_low - 1.0 * atr
+
+        action = "BUY ON DIP"
+
+
+
+    elif "Sell" in signal or "Avoid" in signal:
+
+        buy_low = np.nan
+
+        buy_high = np.nan
+
+        target = min(support, close - 1.4 * atr)
+
+        stop_loss = close + 1.0 * atr
+
+        action = "AVOID / SELL SETUP"
+
+
+
+    else:
 
         buy_low = close - 0.6 * atr
 
@@ -684,23 +1490,27 @@ def trade_plan(latest, signal, confidence, expected_return, horizon_days):
 
         target = close + 1.1 * atr
 
-        stop_loss = close - atr
+        stop_loss = close - 1.0 * atr
+
+        action = "WAIT / HOLD SETUP"
+
+
+
+    if horizon_days <= 5:
+
+        hold = "1-5 days"
+
+    elif horizon_days <= 14:
+
+        hold = "5-14 days"
+
+    elif horizon_days <= 60:
+
+        hold = "2-8 weeks"
 
     else:
 
-        action = "AVOID / SELL SETUP"
-
-        buy_low = np.nan
-
-        buy_high = np.nan
-
-        target = close - atr
-
-        stop_loss = close + atr
-
-
-
-    hold = "1-5 days" if horizon_days <= 5 else "5-14 days" if horizon_days <= 14 else "2-8 weeks"
+        hold = "2-6 months"
 
 
 
@@ -728,47 +1538,9 @@ def trade_plan(latest, signal, confidence, expected_return, horizon_days):
 
 
 
-def make_chart(df, ticker):
+def scanner_score(ticker, period, interval, market_score, market_label):
 
-    fig = go.Figure()
-
-
-
-    fig.add_trace(go.Scatter(x=df["Date"], y=df["Close"], mode="lines", name="Close"))
-
-    fig.add_trace(go.Scatter(x=df["Date"], y=df["MA9"], mode="lines", name="MA9"))
-
-    fig.add_trace(go.Scatter(x=df["Date"], y=df["MA20"], mode="lines", name="MA20"))
-
-    fig.add_trace(go.Scatter(x=df["Date"], y=df["MA50"], mode="lines", name="MA50"))
-
-
-
-    fig.update_layout(
-
-        title=f"{ticker} Price Chart",
-
-        xaxis_title="Date",
-
-        yaxis_title="Price",
-
-        height=500
-
-    )
-
-
-
-    return fig
-
-
-
-
-
-def analyze_ticker(ticker, period, short_days):
-
-    live_price, quote_source = get_live_quote(ticker)
-
-    df = load_price_data(ticker, period)
+    df = load_price_data(ticker, period, interval)
 
 
 
@@ -778,61 +1550,71 @@ def analyze_ticker(ticker, period, short_days):
 
 
 
-    df = add_indicators(df, live_price)
+    df = add_indicators(df)
 
 
 
     if df.empty:
 
         return None
-
-
-
-    news_df, news_score, news_label = load_news_sentiment(ticker)
-
-    forecast_df, expected_return = estimate_future_price(df, short_days)
 
 
 
     latest = df.iloc[-1]
 
-    signal, score, confidence, reasons = make_signal(latest, news_score)
-
-    plan = trade_plan(latest, signal, confidence, expected_return, short_days)
+    data_source = latest.get("Data_Source", "Unknown")
 
 
 
-    source = quote_source if live_price is not None else df["Data_Source"].iloc[-1]
+    fundamentals = load_fundamentals(ticker)
+
+    _, news_score, news_label = load_news_sentiment(ticker)
+
+    _, expected_return, _ = estimate_future_price(df, 5)
+
+
+
+    scores = score_stock(
+
+        latest,
+
+        fundamentals,
+
+        expected_return,
+
+        news_score,
+
+        market_score,
+
+        market_label
+
+    )
+
+
+
+    confidence = confidence_score(scores, expected_return, news_score)
 
 
 
     return {
 
-        "df": df,
+        "Ticker": ticker,
 
-        "news_df": news_df,
+        "Price": round(safe_num(latest["Close"]), 2),
 
-        "news_score": news_score,
+        "Signal": scores["signal"],
 
-        "news_label": news_label,
+        "Confidence": confidence,
 
-        "forecast_df": forecast_df,
+        "Risk": scores["risk"],
 
-        "expected_return": expected_return,
+        "News": news_label,
 
-        "latest": latest,
+        "Expected Return %": round(expected_return * 100, 2),
 
-        "signal": signal,
+        "Total Score": scores["total_score"],
 
-        "score": score,
-
-        "confidence": confidence,
-
-        "reasons": reasons,
-
-        "plan": plan,
-
-        "source": source
+        "Data Source": data_source
 
     }
 
@@ -840,25 +1622,115 @@ def analyze_ticker(ticker, period, short_days):
 
 
 
+tickers, ticker_df = get_all_tickers()
+
+
+
+with st.spinner("Loading market direction..."):
+
+    market_score, market_label = get_market_direction()
+
+
+
 st.sidebar.header("Settings")
 
 
 
-mode = st.sidebar.selectbox("Trading mode", ["Swing / Multi-day", "Historical / Long-term"], index=0)
+mode = st.sidebar.selectbox(
+
+    "Trading mode",
+
+    ["Swing / Multi-day", "Historical / Long-term"],
+
+    index=0
+
+)
 
 
 
-period = "1y" if mode == "Swing / Multi-day" else "5y"
+if mode == "Swing / Multi-day":
+
+    period = "1y"
+
+    interval = "1d"
+
+else:
+
+    period = "5y"
+
+    interval = "1d"
 
 
 
-short_days = st.sidebar.selectbox("Short-term horizon", [1, 3, 5, 10, 14], index=2)
+short_term_days = st.sidebar.selectbox(
 
-scan_count = st.sidebar.selectbox("How many stocks to scan?", [5, 10], index=1)
+    "Short-term horizon",
+
+    [1, 3, 5, 10, 14],
+
+    index=2
+
+)
 
 
 
-selected_ticker = st.sidebar.selectbox("Select one stock", TICKERS, index=0)
+long_term_days = st.sidebar.selectbox(
+
+    "Long-term horizon",
+
+    [30, 60, 90, 120, 180],
+
+    index=1
+
+)
+
+
+
+scan_count = st.sidebar.selectbox(
+
+    "How many stocks to scan?",
+
+    [5, 10, 25, 50],
+
+    index=1
+
+)
+
+
+
+scan_count = min(scan_count, len(tickers))
+
+
+
+st.sidebar.write(f"Available tickers loaded: {len(tickers)}")
+
+st.sidebar.write(f"Market: {market_label}")
+
+
+
+default_ticker = "AAPL"
+
+
+
+if default_ticker in tickers:
+
+    default_index = tickers.index(default_ticker)
+
+else:
+
+    default_index = 0
+
+
+
+selected_ticker = st.sidebar.selectbox(
+
+    "Select one stock",
+
+    tickers,
+
+    index=default_index
+
+)
 
 
 
@@ -868,155 +1740,473 @@ tab1, tab2, tab3 = st.tabs(["Single Stock", "Scanner", "Ticker List"])
 
 with tab1:
 
-    result = analyze_ticker(selected_ticker, period, short_days)
+    with st.spinner("Loading price data..."):
+
+        df = load_price_data(selected_ticker, period, interval)
 
 
 
-    if result is None:
+    if df.empty:
 
-        st.error("Could not load data.")
+        st.error("Could not load data. Try AAPL, MSFT, NVDA, SPY, or QQQ.")
 
     else:
 
-        latest = result["latest"]
+        df = add_indicators(df)
 
 
 
-        st.subheader(f"{selected_ticker} Trading Plan")
+        if df.empty:
 
-        st.info(f"Data source for current price: {result['source']}")
-
-
-
-        c1, c2, c3, c4 = st.columns(4)
-
-        c1.metric("Current Price", f"${latest['Close']:.2f}")
-
-        c2.metric("Signal", result["signal"])
-
-        c3.metric("Score", result["score"])
-
-        c4.metric("Confidence", f"{result['confidence']}%")
-
-
-
-        st.markdown("### Trading Plan")
-
-        st.dataframe(result["plan"], use_container_width=True)
-
-
-
-        st.markdown("### Price Chart")
-
-        st.plotly_chart(make_chart(result["df"], selected_ticker), use_container_width=True)
-
-
-
-        st.markdown("### Estimated Future Price")
-
-        st.dataframe(result["forecast_df"], use_container_width=True)
-
-
-
-        st.markdown("### Why this signal?")
-
-        for r in result["reasons"]:
-
-            st.write(f"- {r}")
-
-
-
-        st.markdown("### Latest Indicators")
-
-        indicators = pd.DataFrame({
-
-            "Metric": ["Close", "MA9", "MA20", "MA50", "RSI", "MACD", "MACD Signal", "ATR", "Support", "Resistance"],
-
-            "Value": [
-
-                round(latest["Close"], 2),
-
-                round(latest["MA9"], 2),
-
-                round(latest["MA20"], 2),
-
-                round(latest["MA50"], 2),
-
-                round(latest["RSI"], 2),
-
-                round(latest["MACD"], 2),
-
-                round(latest["MACD_Signal"], 2),
-
-                round(latest["ATR"], 2),
-
-                round(latest["Support"], 2),
-
-                round(latest["Resistance"], 2)
-
-            ]
-
-        })
-
-        st.dataframe(indicators, use_container_width=True)
-
-
-
-        st.markdown("### Recent News")
-
-        if result["news_df"].empty:
-
-            st.warning("No news loaded. Add FINNHUB_API_KEY in Streamlit secrets.")
+            st.error("Not enough data for indicators. Try Historical / Long-term mode.")
 
         else:
 
-            st.dataframe(result["news_df"], use_container_width=True)
+            data_source = df["Data_Source"].iloc[-1] if "Data_Source" in df.columns else "Unknown"
+
+
+
+            fundamentals = load_fundamentals(selected_ticker)
+
+            news_df, news_score, news_label = load_news_sentiment(selected_ticker)
+
+
+
+            short_estimate_df, short_expected_return, _ = estimate_future_price(
+
+                df,
+
+                short_term_days
+
+            )
+
+
+
+            long_estimate_df, long_expected_return, _ = estimate_future_price(
+
+                df,
+
+                long_term_days
+
+            )
+
+
+
+            latest = df.iloc[-1]
+
+
+
+            short_scores = score_stock(
+
+                latest,
+
+                fundamentals,
+
+                short_expected_return,
+
+                news_score,
+
+                market_score,
+
+                market_label
+
+            )
+
+
+
+            long_scores = score_stock(
+
+                latest,
+
+                fundamentals,
+
+                long_expected_return,
+
+                news_score,
+
+                market_score,
+
+                market_label
+
+            )
+
+
+
+            short_confidence = confidence_score(
+
+                short_scores,
+
+                short_expected_return,
+
+                news_score
+
+            )
+
+
+
+            long_confidence = confidence_score(
+
+                long_scores,
+
+                long_expected_return,
+
+                news_score
+
+            )
+
+
+
+            short_plan = trade_plan(
+
+                latest,
+
+                short_scores["signal"],
+
+                short_confidence,
+
+                short_expected_return,
+
+                short_term_days
+
+            )
+
+
+
+            long_plan = trade_plan(
+
+                latest,
+
+                long_scores["signal"],
+
+                long_confidence,
+
+                long_expected_return,
+
+                long_term_days
+
+            )
+
+
+
+            st.subheader(f"{selected_ticker} Trading Plan")
+
+            st.info(f"Data source: {data_source}")
+
+
+
+            c1, c2, c3, c4, c5 = st.columns(5)
+
+
+
+            c1.metric("Current Price", f"${latest['Close']:.2f}")
+
+            c2.metric("Risk", short_scores["risk"])
+
+            c3.metric(
+
+                f"Short Signal ({short_term_days}d)",
+
+                short_scores["signal"]
+
+            )
+
+            c4.metric(
+
+                f"Long Signal ({long_term_days}d)",
+
+                long_scores["signal"]
+
+            )
+
+            c5.metric("Market", market_label)
+
+
+
+            st.markdown("### Short-Term Trading Plan")
+
+            st.dataframe(short_plan, use_container_width=True)
+
+
+
+            st.markdown("### Long-Term Trading Plan")
+
+            st.dataframe(long_plan, use_container_width=True)
+
+
+
+            st.info(
+
+                f"Short-term: {short_scores['signal']} | "
+
+                f"Confidence: {short_confidence}% | "
+
+                f"Estimated Return: {short_expected_return:.2%} | "
+
+                f"News: {news_label}"
+
+            )
+
+
+
+            st.info(
+
+                f"Long-term: {long_scores['signal']} | "
+
+                f"Confidence: {long_confidence}% | "
+
+                f"Estimated Return: {long_expected_return:.2%} | "
+
+                f"Market: {market_label}"
+
+            )
+
+
+
+            st.markdown("### Price Chart")
+
+            st.plotly_chart(
+
+                make_price_chart(df, selected_ticker, f"({mode})"),
+
+                use_container_width=True
+
+            )
+
+
+
+            st.markdown("### Estimated Future Prices")
+
+
+
+            combined_estimate_df = pd.concat(
+
+                [short_estimate_df, long_estimate_df],
+
+                ignore_index=True
+
+            )
+
+
+
+            st.dataframe(combined_estimate_df, use_container_width=True)
+
+
+
+            st.markdown("### Score Breakdown")
+
+
+
+            score_df = pd.DataFrame({
+
+                "Category": [
+
+                    "Short Technical",
+
+                    "Short Fundamental",
+
+                    "Short Forecast",
+
+                    "Short News",
+
+                    "Short Market",
+
+                    "Short Total",
+
+                    "Long Technical",
+
+                    "Long Fundamental",
+
+                    "Long Forecast",
+
+                    "Long News",
+
+                    "Long Market",
+
+                    "Long Total"
+
+                ],
+
+                "Score": [
+
+                    short_scores["technical_score"],
+
+                    short_scores["fundamental_score"],
+
+                    short_scores["forecast_score"],
+
+                    short_scores["news_score_component"],
+
+                    short_scores["market_score_component"],
+
+                    short_scores["total_score"],
+
+                    long_scores["technical_score"],
+
+                    long_scores["fundamental_score"],
+
+                    long_scores["forecast_score"],
+
+                    long_scores["news_score_component"],
+
+                    long_scores["market_score_component"],
+
+                    long_scores["total_score"]
+
+                ]
+
+            })
+
+
+
+            st.dataframe(score_df, use_container_width=True)
+
+
+
+            st.markdown("### Why Short-Term Signal?")
+
+            for r in short_scores["reasons"]:
+
+                st.write(f"- {r}")
+
+
+
+            st.markdown("### Why Long-Term Signal?")
+
+            for r in long_scores["reasons"]:
+
+                st.write(f"- {r}")
+
+
+
+            st.markdown("### Fundamentals")
+
+
+
+            if fundamentals:
+
+                st.dataframe(
+
+                    pd.DataFrame({
+
+                        "Metric": list(fundamentals.keys()),
+
+                        "Value": list(fundamentals.values())
+
+                    }),
+
+                    use_container_width=True
+
+                )
+
+            else:
+
+                st.warning("No fundamentals loaded.")
+
+
+
+            st.markdown("### Recent News")
+
+
+
+            if news_df.empty:
+
+                st.warning(
+
+                    "No news loaded. Add FINNHUB_API_KEY in Streamlit secrets if you want news."
+
+                )
+
+            else:
+
+                st.dataframe(news_df, use_container_width=True)
+
+
 
 
 
 with tab2:
 
+    st.subheader("Scanner")
+
+    st.write(f"Scanning first {scan_count} stocks. Market condition: {market_label}")
+
+
+
     rows = []
 
-
-
-    for ticker in TICKERS[:scan_count]:
-
-        r = analyze_ticker(ticker, period, short_days)
+    progress = st.progress(0)
 
 
 
-        if r is None:
+    for i, ticker in enumerate(tickers[:scan_count]):
 
-            continue
+        result = scanner_score(
+
+            ticker,
+
+            period,
+
+            interval,
+
+            market_score,
+
+            market_label
+
+        )
 
 
 
-        rows.append({
+        if result is not None:
 
-            "Ticker": ticker,
+            rows.append(result)
 
-            "Price": round(r["latest"]["Close"], 2),
 
-            "Signal": r["signal"],
 
-            "Score": r["score"],
-
-            "Confidence": r["confidence"],
-
-            "News": r["news_label"],
-
-            "Expected Return %": round(r["expected_return"] * 100, 2),
-
-            "Data Source": r["source"]
-
-        })
+        progress.progress((i + 1) / scan_count)
 
 
 
     if rows:
 
-        scanner_df = pd.DataFrame(rows).sort_values(["Score", "Confidence"], ascending=False)
+        scanner_df = pd.DataFrame(rows)
+
+
+
+        order = {
+
+            "Strong Buy": 1,
+
+            "Buy Signal": 2,
+
+            "Buy on Dip": 3,
+
+            "Hold / Wait": 4,
+
+            "Wait for Market Confirmation": 5,
+
+            "Avoid / Negative News": 6,
+
+            "Avoid / High Risk": 7,
+
+            "Sell / High Caution": 8
+
+        }
+
+
+
+        scanner_df["Sort"] = scanner_df["Signal"].map(order).fillna(9)
+
+
+
+        scanner_df = scanner_df.sort_values(
+
+            ["Sort", "Confidence", "Total Score"],
+
+            ascending=[True, False, False]
+
+        ).drop(columns=["Sort"])
+
+
 
         st.dataframe(scanner_df, use_container_width=True)
 
@@ -1040,11 +2230,14 @@ with tab2:
 
 
 
+
+
 with tab3:
 
     st.subheader("Ticker List")
 
-    st.dataframe(pd.DataFrame({"Ticker": TICKERS}), use_container_width=True)
+    st.write(f"Total tickers loaded: {len(ticker_df)}")
 
+    st.dataframe(ticker_df, use_container_width=True)
 
 

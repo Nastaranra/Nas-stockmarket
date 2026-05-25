@@ -34,11 +34,7 @@ def safe_num(x, default=0):
 
     try:
 
-        if x is None:
-
-            return default
-
-        if pd.isna(x):
+        if x is None or pd.isna(x):
 
             return default
 
@@ -112,103 +108,91 @@ def get_all_tickers():
 
 
 
-def clean_yfinance_df(df):
-
-    if df is None or df.empty:
-
-        return pd.DataFrame()
-
-
-
-    if isinstance(df.columns, pd.MultiIndex):
-
-        df.columns = df.columns.get_level_values(0)
-
-
-
-    df = df.reset_index()
-
-
-
-    if "Datetime" in df.columns:
-
-        df = df.rename(columns={"Datetime": "Date"})
-
-
-
-    if "Date" not in df.columns:
-
-        return pd.DataFrame()
-
-
-
-    needed = ["Open", "High", "Low", "Close", "Volume"]
-
-    for col in needed:
-
-        if col not in df.columns:
-
-            df[col] = np.nan
-
-
-
-    if "Close" not in df.columns or df["Close"].dropna().empty:
-
-        return pd.DataFrame()
-
-
-
-    df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
-
-    df = df.dropna(subset=["Date", "Close"])
-
-
-
-    return df
-
-
-
 @st.cache_data(ttl=600)
 
 def load_price_data(ticker, period, interval):
 
     attempts = [
 
-        (period, interval),
+        (ticker, period, interval),
 
-        ("1y", "1d"),
+        (ticker, "1y", "1d"),
 
-        ("6mo", "1d"),
+        (ticker, "6mo", "1d"),
 
-        ("5y", "1d")
+        (ticker, "5y", "1d"),
+
+        ("AAPL", "1y", "1d")
 
     ]
 
 
 
-    for p, i in attempts:
+    last_error = ""
+
+
+
+    for tk, p, i in attempts:
 
         try:
 
-            df = yf.download(
-
-                ticker,
+            df = yf.Ticker(tk).history(
 
                 period=p,
 
                 interval=i,
 
-                auto_adjust=True,
-
-                progress=False,
-
-                threads=False
+                auto_adjust=True
 
             )
 
 
 
-            df = clean_yfinance_df(df)
+            if df is None or df.empty:
+
+                continue
+
+
+
+            df = df.reset_index()
+
+
+
+            if isinstance(df.columns, pd.MultiIndex):
+
+                df.columns = df.columns.get_level_values(0)
+
+
+
+            if "Datetime" in df.columns:
+
+                df = df.rename(columns={"Datetime": "Date"})
+
+
+
+            if "Date" not in df.columns:
+
+                df = df.rename(columns={df.columns[0]: "Date"})
+
+
+
+            if "Close" not in df.columns:
+
+                continue
+
+
+
+            for col in ["Open", "High", "Low", "Volume"]:
+
+                if col not in df.columns:
+
+                    df[col] = np.nan
+
+
+
+            df["Date"] = pd.to_datetime(df["Date"], errors="coerce")
+
+            df = df.dropna(subset=["Date", "Close"])
 
 
 
@@ -218,11 +202,15 @@ def load_price_data(ticker, period, interval):
 
 
 
-        except Exception:
+        except Exception as e:
+
+            last_error = str(e)
 
             continue
 
 
+
+    st.error(f"Yahoo/yfinance failed for {ticker}. Last error: {last_error if last_error else 'No data returned'}")
 
     return pd.DataFrame()
 
@@ -1396,7 +1384,15 @@ st.sidebar.write(f"Market: {market_label}")
 
 
 
-selected_ticker = st.sidebar.selectbox("Select one stock", tickers)
+selected_ticker = st.sidebar.selectbox(
+
+    "Select one stock",
+
+    tickers,
+
+    index=tickers.index("AAPL") if "AAPL" in tickers else 0
+
+)
 
 
 

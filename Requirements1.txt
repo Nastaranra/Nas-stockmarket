@@ -1,0 +1,8 @@
+streamlit
+yfinance==0.2.54
+pandas
+numpy
+requests
+plotly
+curl_cffi
+setuptools

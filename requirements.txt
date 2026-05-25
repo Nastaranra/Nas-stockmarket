@@ -1,12 +1,8 @@
 streamlit
-yfinance
+yfinance==0.2.54
 pandas
 numpy
-plotly
-scikit-learn
-lxml
-html5lib
-beautifulsoup4
 requests
-streamlit-autorefresh
-
+plotly
+curl_cffi
+setuptools
